@@ -120,7 +120,7 @@ def test_project_context_runtime_skill_exposes_observation_notebook_script() -> 
         cwd=Path("src"),
     )
 
-    assert json.loads(context_overview.stdout)["project"] == "job_scraping"
+    assert json.loads(context_overview.stdout)["project"] == Path.cwd().name
     assert json.loads(notes.stdout)["status"] == "success"
 
 
