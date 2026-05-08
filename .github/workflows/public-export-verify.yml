@@ -29,7 +29,7 @@ jobs:
 
       - name: Run public export tests
         env:
-          TERMINAL_WIDTH: "160"
+          _TYPER_FORCE_DISABLE_TERMINAL: "1"
         run: uv run pytest tests/test_public_export.py
 
       - name: Validate public export plan
