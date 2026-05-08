@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["valid", "checks", "candidate_count", "relevant_count"],
+  "properties": {
+    "valid": {"type": "boolean"},
+    "checks": {"type": "object"},
+    "candidate_count": {"type": "integer"},
+    "relevant_count": {"type": "integer"},
+    "warnings": {"type": "array", "items": {"type": "string"}}
+  }
+}

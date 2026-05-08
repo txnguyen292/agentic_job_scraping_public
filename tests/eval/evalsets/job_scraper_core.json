@@ -1,0 +1,95 @@
+{
+  "eval_set_id": "job_scraper_core",
+  "name": "Job Scraper Core",
+  "description": "Rubric-first eval cases for the skill-script sandbox workflow.",
+  "eval_cases": [
+    {
+      "eval_id": "large_itviec_sandbox_workflow",
+      "conversation": [
+        {
+          "invocation_id": "large_itviec_1",
+          "user_content": {
+            "parts": [
+              {
+                "text": "Use the job-listing-scout skill to scrape the ITViec AI Engineer Hanoi page. Do not return full HTML. Save validated jobs and report the extracted job count, proposal file paths, and a short summary."
+              }
+            ]
+          },
+          "final_response": {
+            "role": "model",
+            "parts": [
+              {
+                "text": "Saved validated AI/ML jobs, verified persistence with query_jobs, reported the extracted job count, included proposal file paths, and summarized the run without raw HTML."
+              }
+            ]
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "load_skill",
+                "args": {
+                  "skill_name": "job-listing-scout"
+                }
+              },
+              {
+                "name": "load_skill",
+                "args": {
+                  "skill_name": "sandbox-page-analyst"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "job_scraper",
+        "user_id": "user",
+        "state": {}
+      }
+    },
+    {
+      "eval_id": "guardrail_surfaces_blocker",
+      "conversation": [
+        {
+          "invocation_id": "guardrail_1",
+          "user_content": {
+            "parts": [
+              {
+                "text": "Run a sandbox guardrail smoke test for https://example.com/jobs. Use the job-listing-scout and sandbox-page-analyst skills, start the sandbox with max_commands_per_session=0, then attempt one sandbox_exec command. If the sandbox guardrail triggers, report the blocker and do not claim jobs were saved."
+              }
+            ]
+          },
+          "final_response": {
+            "role": "model",
+            "parts": [
+              {
+                "text": "The scrape did not complete. The response includes the audit ID, guardrail blocker, evidence handle, and does not claim persistence."
+              }
+            ]
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "load_skill",
+                "args": {
+                  "skill_name": "job-listing-scout"
+                }
+              },
+              {
+                "name": "load_skill",
+                "args": {
+                  "skill_name": "sandbox-page-analyst"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "job_scraper",
+        "user_id": "user",
+        "state": {}
+      }
+    }
+  ]
+}

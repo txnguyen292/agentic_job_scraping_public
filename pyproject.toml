@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "job-scraper"
+version = "0.1.0"
+description = "Seed-driven AI/ML job scraper with SQLite storage and a Streamlit dashboard."
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+  "google-adk[eval]>=1.32,<1.33",
+  "litellm>=1.82,<2",
+  "loguru>=0.7,<1",
+  "docker>=7,<8",
+  "openai-agents>=0.14,<0.15",
+  "pydantic>=2,<3",
+  "pytest>=8,<9",
+  "rich>=13.7,<14",
+  "scrapling[fetchers]>=0.4.7,<0.5",
+  "streamlit>=1.40,<2",
+  "typer>=0.20,<1",
+]
+
+[project.scripts]
+job-scraper = "job_scraper.cli:main"
+job-scraper-public-export = "job_scraper.public_export:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+  "docker: requires Docker runtime",
+  "adk_eval: requires ADK eval/model runtime",
+]

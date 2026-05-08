@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["strategy", "source_files", "candidate_selectors"],
+  "properties": {
+    "strategy": {"type": "string"},
+    "source_files": {"type": "array", "items": {"type": "string"}},
+    "candidate_selectors": {"type": "object"},
+    "fallbacks": {"type": "array", "items": {"type": "string"}},
+    "warnings": {"type": "array", "items": {"type": "string"}}
+  }
+}

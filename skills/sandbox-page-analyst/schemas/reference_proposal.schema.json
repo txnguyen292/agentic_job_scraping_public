@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["title", "reason", "proposed_reference_path"],
+  "properties": {
+    "title": {"type": "string"},
+    "reason": {"type": "string"},
+    "proposed_reference_path": {"type": "string"},
+    "evidence": {"type": "array"},
+    "human_approval_required": {"type": "boolean"}
+  }
+}

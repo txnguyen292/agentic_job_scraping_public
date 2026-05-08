@@ -1,0 +1,44 @@
+{
+  "jobs": [
+    {
+      "id": 1001,
+      "title": "Machine Learning Engineer",
+      "absolute_url": "https://example.com/demo-ai-labs/jobs/1001",
+      "updated_at": "2026-04-20T12:00:00Z",
+      "location": {
+        "name": "Remote, United States"
+      },
+      "departments": [
+        {
+          "name": "Applied AI"
+        }
+      ],
+      "offices": [
+        {
+          "name": "Remote"
+        }
+      ],
+      "content": "<p>Build training pipelines, model serving systems, and LLM inference services for a venture-backed startup.</p>"
+    },
+    {
+      "id": 1002,
+      "title": "Product Designer",
+      "absolute_url": "https://example.com/demo-ai-labs/jobs/1002",
+      "updated_at": "2026-04-18T12:00:00Z",
+      "location": {
+        "name": "San Francisco, United States"
+      },
+      "departments": [
+        {
+          "name": "Design"
+        }
+      ],
+      "offices": [
+        {
+          "name": "San Francisco"
+        }
+      ],
+      "content": "<p>Shape the end-to-end product experience for the core platform.</p>"
+    }
+  ]
+}

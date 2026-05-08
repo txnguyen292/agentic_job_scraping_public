@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["page_files", "detected_layouts", "signals", "selected_references"],
+  "properties": {
+    "page_files": {"type": "array", "items": {"type": "string"}},
+    "title": {"type": "string"},
+    "content_length": {"type": "integer"},
+    "detected_layouts": {"type": "array", "items": {"type": "string"}},
+    "signals": {"type": "object"},
+    "selected_references": {"type": "array", "items": {"type": "string"}},
+    "warnings": {"type": "array", "items": {"type": "string"}}
+  }
+}

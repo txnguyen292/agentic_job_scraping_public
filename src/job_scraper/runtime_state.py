@@ -1,0 +1,3 @@
+from __future__ import annotations
+
+SESSION_EXTRACTION_CONTEXT_STATE_KEY = "_job_scraper_session_extraction_context"

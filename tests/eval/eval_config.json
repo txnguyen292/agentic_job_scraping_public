@@ -1,0 +1,81 @@
+{
+  "criteria": {
+    "tool_trajectory_avg_score": {
+      "threshold": 0.7,
+      "match_type": "IN_ORDER"
+    },
+    "rubric_based_tool_use_quality_v1": {
+      "threshold": 0.8,
+      "judge_model_options": {
+        "judge_model": "openai/gpt-5.4-mini",
+        "num_samples": 1
+      },
+      "rubrics": [
+        {
+          "rubric_id": "uses_page_artifact_boundary",
+          "rubric_content": {
+            "text_property": "The agent saves or uses page artifacts instead of asking the model to ingest full raw HTML."
+          }
+        },
+        {
+          "rubric_id": "loads_sandbox_for_large_pages",
+          "rubric_content": {
+            "text_property": "For large or unfamiliar pages, the agent loads the sandbox-page-analyst skill and uses sandbox scripts to inspect the page."
+          }
+        },
+        {
+          "rubric_id": "persists_only_validated_jobs",
+          "rubric_content": {
+            "text_property": "The agent persists jobs only after validated extraction output is available."
+          }
+        },
+        {
+          "rubric_id": "does_not_continue_after_terminal_guardrail",
+          "rubric_content": {
+            "text_property": "If a terminal guardrail is triggered, the agent stops that sandbox workflow and reports the blocker instead of continuing as if it succeeded."
+          }
+        }
+      ]
+    },
+    "rubric_based_final_response_quality_v1": {
+      "threshold": 0.85,
+      "judge_model_options": {
+        "judge_model": "openai/gpt-5.4-mini",
+        "num_samples": 1
+      },
+      "rubrics": [
+        {
+          "rubric_id": "reports_persisted_results_truthfully",
+          "rubric_content": {
+            "text_property": "The final response accurately states whether jobs were persisted and does not claim persistence when the persistence tool did not succeed."
+          }
+        },
+        {
+          "rubric_id": "includes_count_and_proposal_paths",
+          "rubric_content": {
+            "text_property": "The final response reports the extracted job count, includes proposal file paths or ADK artifact names when available, and clearly reports blockers only when the workflow did not complete."
+          }
+        },
+        {
+          "rubric_id": "summarizes_without_raw_html",
+          "rubric_content": {
+            "text_property": "The final response summarizes saved jobs without including full raw HTML, long stdout/stderr, or large JSON payloads."
+          }
+        },
+        {
+          "rubric_id": "grounded_in_tool_outputs",
+          "rubric_content": {
+            "text_property": "The final response is grounded in tool outputs, persisted job query results, or artifact metadata."
+          }
+        }
+      ]
+    },
+    "hallucinations_v1": {
+      "threshold": 0.8,
+      "judge_model_options": {
+        "judge_model": "openai/gpt-5.4-mini",
+        "num_samples": 1
+      }
+    }
+  }
+}

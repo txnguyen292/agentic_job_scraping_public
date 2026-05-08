@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["reason", "patch_type", "human_approval_required"],
+  "properties": {
+    "reason": {"type": "string"},
+    "patch_type": {"type": "string"},
+    "target_path": {"type": "string"},
+    "proposed_change": {"type": "string"},
+    "human_approval_required": {"type": "boolean"}
+  }
+}

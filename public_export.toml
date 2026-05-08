@@ -1,0 +1,80 @@
+[export]
+name = "agentic_job_scraping_public"
+description = "Allowlisted public snapshot derived from the private/internal agentic job scraping repo."
+
+# Keep this list explicit. The internal repo is the source of truth; public
+# export should never rely on a broad mirror or an inverse ignore list.
+include = [
+  ".dockerignore",
+  ".github/workflows/public-export-verify.yml",
+  ".gitignore",
+  ".python-version",
+  "DESIGN_SPEC.md",
+  "README.md",
+  "docker/**",
+  "docs/**",
+  "plans/index.md",
+  "plans/reports.md",
+  "plans/active/**",
+  "plans/notes/**",
+  "pyproject.toml",
+  "public_export.toml",
+  "reports/index.md",
+  "scripts/sync_public.py",
+  "seeds/**",
+  "skills/**",
+  "src/**",
+  "tests/**",
+  "uv.lock",
+]
+
+# Defense in depth. These patterns are excluded even if a future include entry
+# accidentally becomes too broad.
+exclude = [
+  ".contexts/**",
+  ".env",
+  ".env.*",
+  ".git/**",
+  ".pytest_cache/**",
+  ".ruff_cache/**",
+  ".venv/**",
+  "**/.DS_Store",
+  "**/__pycache__/**",
+  "**/*.pyc",
+  "*.db",
+  "*.sqlite",
+  "*.sqlite3",
+  "data/**",
+  "reports/adk-runs/**",
+  "rollout-*.jsonl",
+  "session_id.txt",
+  "src/.adk/**",
+  "src/job_scraper.egg-info/**",
+  "src/job_scraper/.adk/**",
+]
+
+[verification]
+forbidden_paths = [
+  ".contexts",
+  ".env",
+  ".venv",
+  "data",
+  "reports/adk-runs",
+  "src/.adk",
+  "src/job_scraper/.adk",
+]
+
+secret_patterns = [
+  "sk-[A-Za-z0-9_-]{20,}",
+  "gho_[A-Za-z0-9_]+",
+  "OPENAI_API_KEY\\s*=",
+  "GOOGLE_API_KEY\\s*=",
+  "ANTHROPIC_API_KEY\\s*=",
+  "SECRET\\s*=",
+  "TOKEN\\s*=",
+  "PASSWORD\\s*=",
+]
+
+secret_scan_exclude = [
+  "public_export.toml",
+]

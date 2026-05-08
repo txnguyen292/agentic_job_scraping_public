@@ -1,0 +1,26 @@
+[
+  {
+    "id": "lv-2001",
+    "text": "Applied Scientist, Robotics AI",
+    "hostedUrl": "https://jobs.example.com/demo-robotics/2001",
+    "createdAt": 1776369600000,
+    "descriptionPlain": "Work on computer vision, deep learning, and reinforcement learning models for autonomous systems in a fast-paced startup.",
+    "categories": {
+      "team": "Autonomy",
+      "location": "Taipei, Taiwan",
+      "commitment": "Full-time"
+    }
+  },
+  {
+    "id": "lv-2002",
+    "text": "Finance Manager",
+    "hostedUrl": "https://jobs.example.com/demo-robotics/2002",
+    "createdAt": 1776283200000,
+    "descriptionPlain": "Own planning, forecasting, and finance operations.",
+    "categories": {
+      "team": "G&A",
+      "location": "Remote",
+      "commitment": "Full-time"
+    }
+  }
+]

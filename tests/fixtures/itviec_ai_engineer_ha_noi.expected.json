@@ -1,0 +1,570 @@
+{
+  "source": {
+    "source_url": "https://itviec.com/it-jobs/ai-engineer/ha-noi?job_selected=ai-developer-engineer-consultant-python-llm-nlp-switch-supply-pty-ltd-2549",
+    "source_name": "ITviec AI Engineer Hanoi",
+    "page_id": "page_itviec_ai_engineer_ha_noi_fixture",
+    "fetched_at": "2026-04-27T06:10:52+07:00"
+  },
+  "jobs": [
+    {
+      "title": "AI Developer/Engineer (Consultant) | Python, LLM, NLP",
+      "company_name": "Switch Supply Pty Ltd",
+      "job_url": "https://itviec.com/it-jobs/ai-developer-engineer-consultant-python-llm-nlp-switch-supply-pty-ltd-2549",
+      "location_raw": "Remote Ho Chi Minh - Da Nang - Ha Noi",
+      "employment_type": "",
+      "posted_at": "5 days ago",
+      "salary_raw": "Sign in to view salary",
+      "description_text": "",
+      "tags": [
+        "Data Engineer",
+        "Tailwind",
+        "ReactJS",
+        "PostgreSql",
+        "NextJS",
+        "AI"
+      ],
+      "relevance_reason": "Listing appears on ITviec AI Engineer Hanoi search results and includes AI/ML-related title, category, or skill tags.",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "file": "page.html",
+          "locator": "div.job-card[data-search--job-selection-job-index-value='0']",
+          "text": "AI Developer/Engineer (Consultant) | Python, LLM, NLP - Switch Supply Pty Ltd - Remote Ho Chi Minh - Da Nang - Ha Noi - Sign in to view salary"
+        }
+      ]
+    },
+    {
+      "title": "Chuyên viên AI Engineer (Machine Learning, Python)",
+      "company_name": "Trung tâm công nghệ thông tin MobiFone",
+      "job_url": "https://itviec.com/it-jobs/chuyen-vien-ai-engineer-machine-learning-python-trung-tam-cong-nghe-thong-tin-mobifone-4615",
+      "location_raw": "At office Ha Noi",
+      "employment_type": "",
+      "posted_at": "2 days ago",
+      "salary_raw": "Sign in to view salary",
+      "description_text": "",
+      "tags": [
+        "AI",
+        "Docker",
+        "TensorFlow",
+        "Python",
+        "NLP",
+        "Machine Learning"
+      ],
+      "relevance_reason": "Listing appears on ITviec AI Engineer Hanoi search results and includes AI/ML-related title, category, or skill tags.",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "file": "page.html",
+          "locator": "div.job-card[data-search--job-selection-job-index-value='1']",
+          "text": "Chuyên viên AI Engineer (Machine Learning, Python) - Trung tâm công nghệ thông tin MobiFone - At office Ha Noi - Sign in to view salary"
+        }
+      ]
+    },
+    {
+      "title": "Innovation Engineer (AI/Blockchain/MVP)",
+      "company_name": "Sun Group",
+      "job_url": "https://itviec.com/it-jobs/innovation-engineer-ai-blockchain-sun-group-1724",
+      "location_raw": "At office Ha Noi",
+      "employment_type": "",
+      "posted_at": "3 days ago",
+      "salary_raw": "Sign in to view salary",
+      "description_text": "",
+      "tags": [
+        "AI",
+        "Fullstack",
+        "MVP",
+        "Blockchain"
+      ],
+      "relevance_reason": "Listing appears on ITviec AI Engineer Hanoi search results and includes AI/ML-related title, category, or skill tags.",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "file": "page.html",
+          "locator": "div.job-card[data-search--job-selection-job-index-value='2']",
+          "text": "Innovation Engineer (AI/Blockchain/MVP) - Sun Group - At office Ha Noi - Sign in to view salary"
+        }
+      ]
+    },
+    {
+      "title": "Junior/Middle AI Engineer (AI/ML, Python)",
+      "company_name": "KALAPA",
+      "job_url": "https://itviec.com/it-jobs/junior-middle-ai-engineer-ai-ml-python-kalapa-4811",
+      "location_raw": "At office Ha Noi",
+      "employment_type": "",
+      "posted_at": "3 days ago",
+      "salary_raw": "Sign in to view salary",
+      "description_text": "",
+      "tags": [
+        "AI",
+        "Git",
+        "Docker",
+        "OCR",
+        "Python",
+        "Computer Vision"
+      ],
+      "relevance_reason": "Listing appears on ITviec AI Engineer Hanoi search results and includes AI/ML-related title, category, or skill tags.",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "file": "page.html",
+          "locator": "div.job-card[data-search--job-selection-job-index-value='3']",
+          "text": "Junior/Middle AI Engineer (AI/ML, Python) - KALAPA - At office Ha Noi - Sign in to view salary"
+        }
+      ]
+    },
+    {
+      "title": "(Đống Đa, HN) AI Application Engineer (Python, AI API)",
+      "company_name": "Neos Việt Nam",
+      "job_url": "https://itviec.com/it-jobs/dong-da-hn-ai-application-engineer-python-ai-api-neos-viet-nam-0854",
+      "location_raw": "At office Ha Noi",
+      "employment_type": "",
+      "posted_at": "10 days ago",
+      "salary_raw": "Sign in to view salary",
+      "description_text": "",
+      "tags": [
+        "Fresher Accepted",
+        "AI",
+        "Generative AI",
+        "API",
+        "Machine Learning",
+        "JavaScript",
+        "Python"
+      ],
+      "relevance_reason": "Listing appears on ITviec AI Engineer Hanoi search results and includes AI/ML-related title, category, or skill tags.",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "file": "page.html",
+          "locator": "div.job-card[data-search--job-selection-job-index-value='4']",
+          "text": "(Đống Đa, HN) AI Application Engineer (Python, AI API) - Neos Việt Nam - At office Ha Noi - Sign in to view salary"
+        }
+      ]
+    },
+    {
+      "title": "Intermediate/Senior AI Engineer (Python)",
+      "company_name": "Crossian",
+      "job_url": "https://itviec.com/it-jobs/intermediate-senior-ai-engineer-python-crossian-3827",
+      "location_raw": "At office Ho Chi Minh - Ha Noi",
+      "employment_type": "",
+      "posted_at": "10 days ago",
+      "salary_raw": "Sign in to view salary",
+      "description_text": "",
+      "tags": [
+        "Python",
+        "LLM",
+        "Machine Learning",
+        "AI",
+        "English"
+      ],
+      "relevance_reason": "Listing appears on ITviec AI Engineer Hanoi search results and includes AI/ML-related title, category, or skill tags.",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "file": "page.html",
+          "locator": "div.job-card[data-search--job-selection-job-index-value='5']",
+          "text": "Intermediate/Senior AI Engineer (Python) - Crossian - At office Ho Chi Minh - Ha Noi - Sign in to view salary"
+        }
+      ]
+    },
+    {
+      "title": "Agentic Engineer (Python/Go/C/C++ Backend & AI Agents)",
+      "company_name": "MB Bank",
+      "job_url": "https://itviec.com/it-jobs/agentic-engineer-python-go-c-c-backend-ai-agents-mb-bank-3233",
+      "location_raw": "At office Ha Noi",
+      "employment_type": "",
+      "posted_at": "2 days ago",
+      "salary_raw": "Sign in to view salary",
+      "description_text": "",
+      "tags": [
+        "Python",
+        "FastAPI",
+        "Flask",
+        "TensorFlow",
+        "Microservices",
+        "C++"
+      ],
+      "relevance_reason": "Listing appears on ITviec AI Engineer Hanoi search results and includes AI/ML-related title, category, or skill tags.",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "file": "page.html",
+          "locator": "div.job-card[data-search--job-selection-job-index-value='6']",
+          "text": "Agentic Engineer (Python/Go/C/C++ Backend & AI Agents) - MB Bank - At office Ha Noi - Sign in to view salary"
+        }
+      ]
+    },
+    {
+      "title": "Senior AI Expert (Machine Learning, Deep Learning)",
+      "company_name": "MB Bank",
+      "job_url": "https://itviec.com/it-jobs/senior-ai-expert-machine-learning-deep-learning-mb-bank-2546",
+      "location_raw": "At office Ha Noi",
+      "employment_type": "",
+      "posted_at": "2 days ago",
+      "salary_raw": "Sign in to view salary",
+      "description_text": "",
+      "tags": [
+        "AI",
+        "LLM",
+        "Deep Learning",
+        "Machine Learning",
+        "NLP",
+        "Computer Vision"
+      ],
+      "relevance_reason": "Listing appears on ITviec AI Engineer Hanoi search results and includes AI/ML-related title, category, or skill tags.",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "file": "page.html",
+          "locator": "div.job-card[data-search--job-selection-job-index-value='7']",
+          "text": "Senior AI Expert (Machine Learning, Deep Learning) - MB Bank - At office Ha Noi - Sign in to view salary"
+        }
+      ]
+    },
+    {
+      "title": "AI Expert (Deep Learning, Machine Learning)",
+      "company_name": "MB Bank",
+      "job_url": "https://itviec.com/it-jobs/ai-expert-deep-learning-machine-learning-mb-bank-2321",
+      "location_raw": "At office Ha Noi",
+      "employment_type": "",
+      "posted_at": "2 days ago",
+      "salary_raw": "Sign in to view salary",
+      "description_text": "",
+      "tags": [
+        "AI",
+        "LLM",
+        "Deep Learning",
+        "Machine Learning",
+        "Computer Vision",
+        "NLP"
+      ],
+      "relevance_reason": "Listing appears on ITviec AI Engineer Hanoi search results and includes AI/ML-related title, category, or skill tags.",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "file": "page.html",
+          "locator": "div.job-card[data-search--job-selection-job-index-value='8']",
+          "text": "AI Expert (Deep Learning, Machine Learning) - MB Bank - At office Ha Noi - Sign in to view salary"
+        }
+      ]
+    },
+    {
+      "title": "AI Software Engineer (Python/Go/C/C++ & AI Agents)",
+      "company_name": "MB Bank",
+      "job_url": "https://itviec.com/it-jobs/ai-software-engineer-python-go-c-c-ai-agents-mb-bank-3540",
+      "location_raw": "At office Ha Noi",
+      "employment_type": "",
+      "posted_at": "2 days ago",
+      "salary_raw": "Sign in to view salary",
+      "description_text": "",
+      "tags": [
+        "Python",
+        "Microservices Architecture",
+        "FastAPI",
+        "Docker",
+        "Golang",
+        "C++"
+      ],
+      "relevance_reason": "Listing appears on ITviec AI Engineer Hanoi search results and includes AI/ML-related title, category, or skill tags.",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "file": "page.html",
+          "locator": "div.job-card[data-search--job-selection-job-index-value='9']",
+          "text": "AI Software Engineer (Python/Go/C/C++ & AI Agents) - MB Bank - At office Ha Noi - Sign in to view salary"
+        }
+      ]
+    },
+    {
+      "title": "Senior AI Software Engineer (Ecommerce & Growth)",
+      "company_name": "VNB Global",
+      "job_url": "https://itviec.com/it-jobs/senior-ai-software-engineer-ecommerce-growth-vnb-global-5447",
+      "location_raw": "At office Ha Noi",
+      "employment_type": "",
+      "posted_at": "1 day ago",
+      "salary_raw": "Sign in to view salary",
+      "description_text": "",
+      "tags": [
+        "AI",
+        "LLM",
+        "SQL",
+        "Cloud",
+        "Microservices",
+        "Python"
+      ],
+      "relevance_reason": "Listing appears on ITviec AI Engineer Hanoi search results and includes AI/ML-related title, category, or skill tags.",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "file": "page.html",
+          "locator": "div.job-card[data-search--job-selection-job-index-value='10']",
+          "text": "Senior AI Software Engineer (Ecommerce & Growth) - VNB Global - At office Ha Noi - Sign in to view salary"
+        }
+      ]
+    },
+    {
+      "title": "Middle AI Engineer (ML, MLOps, CI/CD, AWS)",
+      "company_name": "CÔNG TY CỔ PHẦN CÔNG NGHỆ UPP TOÀN CẦU",
+      "job_url": "https://itviec.com/it-jobs/middle-ai-engineer-ml-mlops-ci-cd-aws-cong-ty-co-phan-cong-nghe-upp-toan-cau-4421",
+      "location_raw": "At office Ha Noi",
+      "employment_type": "",
+      "posted_at": "1 day ago",
+      "salary_raw": "Sign in to view salary",
+      "description_text": "",
+      "tags": [
+        "AI",
+        "Project Management",
+        "AWS",
+        "CI/CD",
+        "Machine Learning",
+        "MLOps"
+      ],
+      "relevance_reason": "Listing appears on ITviec AI Engineer Hanoi search results and includes AI/ML-related title, category, or skill tags.",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "file": "page.html",
+          "locator": "div.job-card[data-search--job-selection-job-index-value='11']",
+          "text": "Middle AI Engineer (ML, MLOps, CI/CD, AWS) - CÔNG TY CỔ PHẦN CÔNG NGHỆ UPP TOÀN CẦU - At office Ha Noi - Sign in to view salary"
+        }
+      ]
+    },
+    {
+      "title": "AI Engineer (Python, ML, Data Science, LLMs)",
+      "company_name": "Công Ty TNHH Đầu Tư Thương Mại Và Sản Xuất Chính Phát",
+      "job_url": "https://itviec.com/it-jobs/ai-engineer-python-ml-data-science-llms-cong-ty-tnhh-dau-tu-thuong-mai-va-san-xuat-chinh-phat-2219",
+      "location_raw": "At office Ha Noi",
+      "employment_type": "",
+      "posted_at": "1 day ago",
+      "salary_raw": "Sign in to view salary",
+      "description_text": "",
+      "tags": [
+        "AI",
+        "PyTorch",
+        "Python",
+        "LLM",
+        "Data Science",
+        "Machine Learning"
+      ],
+      "relevance_reason": "Listing appears on ITviec AI Engineer Hanoi search results and includes AI/ML-related title, category, or skill tags.",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "file": "page.html",
+          "locator": "div.job-card[data-search--job-selection-job-index-value='12']",
+          "text": "AI Engineer (Python, ML, Data Science, LLMs) - Công Ty TNHH Đầu Tư Thương Mại Và Sản Xuất Chính Phát - At office Ha Noi - Sign in to view salary"
+        }
+      ]
+    },
+    {
+      "title": "AI Prompt Engineer (Animation, Design)",
+      "company_name": "Công ty TNHH Lotus Animation",
+      "job_url": "https://itviec.com/it-jobs/ai-prompt-engineer-animation-design-cong-ty-tnhh-lotus-animation-3855",
+      "location_raw": "At office Ha Noi",
+      "employment_type": "",
+      "posted_at": "2 days ago",
+      "salary_raw": "Sign in to view salary",
+      "description_text": "",
+      "tags": [
+        "Prompt Engineering",
+        "LLM",
+        "Motion Design",
+        "Design",
+        "AI"
+      ],
+      "relevance_reason": "Listing appears on ITviec AI Engineer Hanoi search results and includes AI/ML-related title, category, or skill tags.",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "file": "page.html",
+          "locator": "div.job-card[data-search--job-selection-job-index-value='13']",
+          "text": "AI Prompt Engineer (Animation, Design) - Công ty TNHH Lotus Animation - At office Ha Noi - Sign in to view salary"
+        }
+      ]
+    },
+    {
+      "title": "[HN] AI Engineer (Generative AI/LLM)- From 2 years’ exp",
+      "company_name": "Toshiba Software Development (Viet Nam) Co, Ltd",
+      "job_url": "https://itviec.com/it-jobs/hn-ai-engineer-generative-ai-llm-from-2-years-exp-toshiba-software-development-viet-nam-co-ltd-2250",
+      "location_raw": "At office Ha Noi",
+      "employment_type": "",
+      "posted_at": "9 days ago",
+      "salary_raw": "Sign in to view salary",
+      "description_text": "",
+      "tags": [
+        "AI",
+        "MLOps",
+        "C++",
+        "Python",
+        "Generative AI",
+        "LLM"
+      ],
+      "relevance_reason": "Listing appears on ITviec AI Engineer Hanoi search results and includes AI/ML-related title, category, or skill tags.",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "file": "page.html",
+          "locator": "div.job-card[data-search--job-selection-job-index-value='14']",
+          "text": "[HN] AI Engineer (Generative AI/LLM)- From 2 years’ exp - Toshiba Software Development (Viet Nam) Co, Ltd - At office Ha Noi - Sign in to view salary"
+        }
+      ]
+    },
+    {
+      "title": "AI Engineer (Fresher, Ứng viên chuẩn bị tốt nghiệp)",
+      "company_name": "MB Bank",
+      "job_url": "https://itviec.com/it-jobs/ai-engineer-fresher-ung-vien-chuan-bi-tot-nghiep-mb-bank-0708",
+      "location_raw": "At office Ha Noi",
+      "employment_type": "",
+      "posted_at": "10 days ago",
+      "salary_raw": "Sign in to view salary",
+      "description_text": "",
+      "tags": [
+        "Fresher Accepted",
+        "AI",
+        "PyTorch",
+        "Microservices",
+        "C++",
+        "Python",
+        "TensorFlow"
+      ],
+      "relevance_reason": "Listing appears on ITviec AI Engineer Hanoi search results and includes AI/ML-related title, category, or skill tags.",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "file": "page.html",
+          "locator": "div.job-card[data-search--job-selection-job-index-value='15']",
+          "text": "AI Engineer (Fresher, Ứng viên chuẩn bị tốt nghiệp) - MB Bank - At office Ha Noi - Sign in to view salary"
+        }
+      ]
+    },
+    {
+      "title": "Senior AI Engineer",
+      "company_name": "Creative Force",
+      "job_url": "https://itviec.com/it-jobs/senior-ai-engineer-creative-force-4427",
+      "location_raw": "At office Ha Noi",
+      "employment_type": "",
+      "posted_at": "14 days ago",
+      "salary_raw": "Sign in to view salary",
+      "description_text": "",
+      "tags": [
+        "AI",
+        "LLM",
+        "Generative AI",
+        "AWS",
+        "English"
+      ],
+      "relevance_reason": "Listing appears on ITviec AI Engineer Hanoi search results and includes AI/ML-related title, category, or skill tags.",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "file": "page.html",
+          "locator": "div.job-card[data-search--job-selection-job-index-value='16']",
+          "text": "Senior AI Engineer - Creative Force - At office Ha Noi - Sign in to view salary"
+        }
+      ]
+    },
+    {
+      "title": "Mid/Senior AI Engineer (Good English)",
+      "company_name": "Outcubator",
+      "job_url": "https://itviec.com/it-jobs/mid-senior-ai-engineer-good-english-outcubator-5027",
+      "location_raw": "At office Ha Noi",
+      "employment_type": "",
+      "posted_at": "19 days ago",
+      "salary_raw": "Sign in to view salary",
+      "description_text": "",
+      "tags": [
+        "AI",
+        "PyTorch",
+        "TensorFlow",
+        "MLOps",
+        "Python"
+      ],
+      "relevance_reason": "Listing appears on ITviec AI Engineer Hanoi search results and includes AI/ML-related title, category, or skill tags.",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "file": "page.html",
+          "locator": "div.job-card[data-search--job-selection-job-index-value='17']",
+          "text": "Mid/Senior AI Engineer (Good English) - Outcubator - At office Ha Noi - Sign in to view salary"
+        }
+      ]
+    },
+    {
+      "title": "AI Engineer (Machine Learning/ Python)",
+      "company_name": "Blue Technology",
+      "job_url": "https://itviec.com/it-jobs/ai-engineer-machine-learning-python-blue-technology-1930",
+      "location_raw": "At office Ha Noi",
+      "employment_type": "",
+      "posted_at": "19 days ago",
+      "salary_raw": "Sign in to view salary",
+      "description_text": "",
+      "tags": [
+        "AI",
+        "Microservices",
+        "Python",
+        "Machine Learning"
+      ],
+      "relevance_reason": "Listing appears on ITviec AI Engineer Hanoi search results and includes AI/ML-related title, category, or skill tags.",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "file": "page.html",
+          "locator": "div.job-card[data-search--job-selection-job-index-value='18']",
+          "text": "AI Engineer (Machine Learning/ Python) - Blue Technology - At office Ha Noi - Sign in to view salary"
+        }
+      ]
+    },
+    {
+      "title": "Senior AI Engineer (Python, SQL, Pytorch)",
+      "company_name": "Aladin Technology",
+      "job_url": "https://itviec.com/it-jobs/senior-ai-engineer-python-sql-pytorch-aladin-technology-3508",
+      "location_raw": "At office Ha Noi",
+      "employment_type": "",
+      "posted_at": "22 days ago",
+      "salary_raw": "Sign in to view salary",
+      "description_text": "",
+      "tags": [
+        "AI",
+        "PyTorch",
+        "Python",
+        "SQL",
+        "Solution Architecture",
+        "Machine Learning"
+      ],
+      "relevance_reason": "Listing appears on ITviec AI Engineer Hanoi search results and includes AI/ML-related title, category, or skill tags.",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "file": "page.html",
+          "locator": "div.job-card[data-search--job-selection-job-index-value='19']",
+          "text": "Senior AI Engineer (Python, SQL, Pytorch) - Aladin Technology - At office Ha Noi - Sign in to view salary"
+        }
+      ]
+    }
+  ],
+  "selectors": {
+    "job_card": "div.job-card[data-search--pagination-target=\"jobCard\"]",
+    "title": "[data-search--job-selection-target=\"jobTitle\"]",
+    "company": "a[href^=\"/companies/\"]",
+    "salary": ".salary",
+    "tags": "[data-responsive-tag-list-target=\"tag\"]",
+    "next_page": "a[rel=\"next\"]"
+  },
+  "crawl": {
+    "discovered_count": 20,
+    "candidate_count": 20,
+    "relevant_count": 20,
+    "blocked": false,
+    "blocker": ""
+  },
+  "warnings": [
+    "The static list cards expose salary as a sign-in gated placeholder for many roles.",
+    "Description text is not present in list cards; detail content requires separate fetches requested by the main agent.",
+    "The page has pagination; this fixture covers page 1 only.",
+    "Expected output was derived from a live ITviec fetch captured on 2026-04-27 and should be treated as a frozen fixture, not a live assertion."
+  ],
+  "metadata": {
+    "html_chars": 496280,
+    "itemlist_url_count": 20,
+    "itemlist_urls_match_cards": true
+  }
+}

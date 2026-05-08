@@ -1,0 +1,91 @@
+{
+  "source": {
+    "source_url": "https://example.com/jobs",
+    "source_name": "Example Board",
+    "page_id": "page_static_fixture",
+    "fetched_at": ""
+  },
+  "jobs": [
+    {
+      "title": "Machine Learning Engineer",
+      "company_name": "Acme AI",
+      "job_url": "https://example.com/jobs/machine-learning-engineer-acme-ai",
+      "location_raw": "Ha Noi, Vietnam",
+      "employment_type": "",
+      "posted_at": "",
+      "salary_raw": "Up to 4,000 USD",
+      "description_text": "Build production machine learning systems for document understanding and ranking.",
+      "tags": ["Python", "Machine Learning", "LLM"],
+      "relevance_reason": "The title and tags explicitly mention machine learning and LLM work.",
+      "confidence": 0.95,
+      "evidence": [
+        {
+          "file": "page.html",
+          "locator": "article[data-job-id='ml-001']",
+          "text": "Machine Learning Engineer - Acme AI - Ha Noi, Vietnam - Up to 4,000 USD"
+        }
+      ]
+    },
+    {
+      "title": "Senior Data Engineer",
+      "company_name": "Nova Labs",
+      "job_url": "https://example.com/jobs/senior-data-engineer-nova-labs",
+      "location_raw": "Hybrid - Ha Noi",
+      "employment_type": "",
+      "posted_at": "",
+      "salary_raw": "3,000 - 5,000 USD",
+      "description_text": "Own data pipelines for analytics, experimentation, and AI product features.",
+      "tags": ["Data Platform", "Python", "Airflow"],
+      "relevance_reason": "The role is a data platform job supporting AI product features.",
+      "confidence": 0.86,
+      "evidence": [
+        {
+          "file": "page.html",
+          "locator": "article[data-job-id='data-002']",
+          "text": "Senior Data Engineer - Nova Labs - Hybrid - Ha Noi - 3,000 - 5,000 USD"
+        }
+      ]
+    },
+    {
+      "title": "Frontend Engineer",
+      "company_name": "Pixel Foundry",
+      "job_url": "https://example.com/jobs/frontend-engineer-pixel-foundry",
+      "location_raw": "Ho Chi Minh City",
+      "employment_type": "",
+      "posted_at": "",
+      "salary_raw": "Negotiable",
+      "description_text": "Build polished interfaces for a creative workflow SaaS product.",
+      "tags": ["React", "TypeScript", "Design Systems"],
+      "relevance_reason": "The role is a general frontend role and is not AI/ML-focused.",
+      "confidence": 0.78,
+      "evidence": [
+        {
+          "file": "page.html",
+          "locator": "article[data-job-id='fe-003']",
+          "text": "Frontend Engineer - Pixel Foundry - Ho Chi Minh City - Negotiable"
+        }
+      ]
+    }
+  ],
+  "selectors": {
+    "job_card": "article.job-card",
+    "title": "a.job-title",
+    "company": ".company",
+    "location": ".location",
+    "salary": ".salary",
+    "tags": ".tags li",
+    "description": ".summary",
+    "next_page": "a[rel='next']"
+  },
+  "crawl": {
+    "discovered_count": 3,
+    "candidate_count": 3,
+    "relevant_count": 2,
+    "blocked": false,
+    "blocker": ""
+  },
+  "warnings": [
+    "Frontend Engineer is included as a discovered candidate but should not be persisted as AI/ML relevant unless the caller requests broad startup roles.",
+    "The page advertises a next page; a full crawl should ask the main agent to fetch pagination rather than letting the sandbox browse."
+  ]
+}

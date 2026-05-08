@@ -1,0 +1,34 @@
+# Local environment
+.env
+.env.*
+!.env.example
+.venv/
+
+# Python caches and build artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# macOS / editor noise
+.DS_Store
+.idea/
+.vscode/
+
+# Runtime data and generated artifacts
+data/
+src/.adk/
+src/job_scraper/.adk/
+reports/*
+!reports/index.md
+
+# Local Codex/session artifacts
+rollout-*.jsonl
+session_id.txt

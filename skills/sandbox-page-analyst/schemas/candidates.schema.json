@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["jobs", "crawl"],
+  "properties": {
+    "source": {"type": "object"},
+    "jobs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["title", "job_url"],
+        "properties": {
+          "title": {"type": "string", "minLength": 1},
+          "company_name": {"type": "string"},
+          "job_url": {"type": "string", "minLength": 1},
+          "location_raw": {"type": "string"},
+          "description_text": {"type": "string"},
+          "tags": {"type": "array", "items": {"type": "string"}},
+          "evidence": {"type": "array"}
+        }
+      }
+    },
+    "selectors": {"type": "object"},
+    "crawl": {"type": "object"},
+    "warnings": {"type": "array", "items": {"type": "string"}}
+  }
+}

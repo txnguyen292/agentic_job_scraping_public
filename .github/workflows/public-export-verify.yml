@@ -1,0 +1,34 @@
+name: Public Export Verify
+
+on:
+  pull_request:
+    paths:
+      - public_export.toml
+      - scripts/sync_public.py
+      - src/job_scraper/public_export.py
+      - .github/workflows/public-export-verify.yml
+
+jobs:
+  verify-exporter:
+    name: Verify exporter logic
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Run public export tests
+        run: uv run pytest tests/test_public_export.py
+
+      - name: Validate public export plan
+        run: uv run python scripts/sync_public.py plan --json
