@@ -14,6 +14,10 @@ This folder is the human-facing planning interface for the project.
 - [Sandbox token reporting](active/03-sandbox-token-reporting.md)
 - [Skill-script sandbox terminal](active/04-skill-script-sandbox-terminal.md)
 
+## Backlog Plans
+
+- [Reusable extraction packages](backlog/01-reusable-extraction-packages.md)
+
 ## Relationship To `.contexts/`
 
 Use `plans/` for human-readable plans and discussion. Use `.contexts/` for agent-operational task state, handoff, lineage, and compact resumption context.

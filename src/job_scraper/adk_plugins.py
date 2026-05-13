@@ -6,6 +6,7 @@ import inspect
 import json
 import os
 import re
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +31,9 @@ SANDBOX_NOTE_BUFFER_STATE_KEY = "_job_scraper_sandbox_note_buffer"
 SANDBOX_NOTES_STATE_KEY = "_job_scraper_sandbox_notes"
 SANDBOX_NOTE_ERROR_STATE_KEY = "_job_scraper_sandbox_note_errors"
 SANDBOX_SUMMARIZED_COMMANDS_STATE_KEY = "_job_scraper_sandbox_summarized_commands"
+WORKFLOW_EVENT_SEQUENCE_STATE_KEY = "_job_scraper_workflow_event_sequence"
+WORKFLOW_SUMMARIZED_EVENTS_STATE_KEY = "_job_scraper_workflow_summarized_events"
+WORKFLOW_EVENT_GROUP = "workflow"
 EXTRACTION_CONTEXT_UPDATE_GUARD_STATE_KEY = "_job_scraper_extraction_context_update_guard"
 SANDBOX_TOOL_BUDGET_STATE_KEY = "_job_scraper_sandbox_tool_budget"
 SANDBOX_READ_GUARD_STATE_KEY = "_job_scraper_sandbox_read_guard"
@@ -37,6 +41,8 @@ INSPECTION_REPEAT_GUARD_STATE_KEY = "_job_scraper_inspection_repeat_guard"
 IMMEDIATE_ERROR_REPEAT_STATE_KEY = "_job_scraper_immediate_error_repeat"
 SANDBOX_ARTIFACT_HANDLES_STATE_KEY = "_job_scraper_sandbox_artifact_handles"
 FINALIZED_SANDBOX_PROMOTION_STATE_KEY = "_job_scraper_finalized_sandbox_promotion"
+MODEL_REASONING_TELEMETRY_STATE_KEY = "_job_scraper_model_reasoning"
+EPHEMERAL_RESOURCE_TOOL_NAMES = {"load_skill", "load_skill_resource"}
 INITIAL_CONTEXT_REQUIRED_TOOLS = {
     "list_skills",
     "load_skill",
@@ -44,6 +50,7 @@ INITIAL_CONTEXT_REQUIRED_TOOLS = {
     "render_page",
     "fetch_page_to_workspace",
     "render_page_to_workspace",
+    "load_test_fixture_page_to_workspace",
     "promote_sandbox_extraction",
     "upsert_job",
     "record_crawl_run",
@@ -51,7 +58,12 @@ INITIAL_CONTEXT_REQUIRED_TOOLS = {
     "list_seed_references",
 }
 DEFAULT_SANDBOX_APP_ROOT = Path(__file__).resolve().parent
-DEFAULT_NOTE_REFINEMENT_MODEL = os.getenv("SANDBOX_NOTE_REFINEMENT_MODEL", os.getenv("OPENAI_MODEL", "openai/gpt-5.4-mini"))
+DEFAULT_NOTE_REFINEMENT_MODEL = (
+    os.getenv("SANDBOX_NOTE_REFINEMENT_MODEL")
+    or os.getenv("JOB_SCRAPER_LLM_MODEL")
+    or os.getenv("OPENAI_MODEL")
+    or "openai/gpt-5.4-mini"
+)
 MAX_WORKFLOW_SANDBOX_TOOL_CALLS = int(os.getenv("JOB_SCRAPER_MAX_WORKFLOW_SANDBOX_TOOL_CALLS", "20"))
 MODEL_RETRY_MAX_ATTEMPTS = int(os.getenv("JOB_SCRAPER_MODEL_RETRY_MAX_ATTEMPTS", "6"))
 MODEL_RETRY_BASE_DELAY_SECONDS = float(os.getenv("JOB_SCRAPER_MODEL_RETRY_BASE_DELAY_SECONDS", "15"))
@@ -76,11 +88,35 @@ SANDBOX_HOST_CONTROL_SCRIPTS = {
 REQUIRED_WORKFLOW_PROTOCOL_OUTPUTS = (
     "output/page_profile.json",
     "output/extraction_strategy.json",
+    "output/extraction_run.json",
     "output/candidates.json",
     "output/validation.json",
     "output/final.json",
+    "output/run_summary.md",
 )
 WORKFLOW_PRODUCER_PATH = "output/extractor.py"
+REQUIRED_OBSERVED_FIELD_STATUSES = {
+    "available",
+    "observed",
+    "required",
+    "required_observed",
+    "observed_required",
+}
+PLACEHOLDER_FIELD_VALUES = {
+    "",
+    "-",
+    "--",
+    "n/a",
+    "na",
+    "none",
+    "null",
+    "not available",
+    "not found",
+    "tbd",
+    "to be determined",
+    "unknown",
+    "unavailable",
+}
 
 
 def _is_state_like(state: Any) -> bool:
@@ -188,6 +224,44 @@ class TransientModelRetryPlugin(BasePlugin):
         return min(self.max_delay_seconds, max(self.base_delay_seconds, hinted_delay))
 
 
+class ModelReasoningTelemetryPlugin(BasePlugin):
+    """Expose compact model reasoning signals as ADK Web-visible state."""
+
+    def __init__(
+        self,
+        *,
+        reasoning_effort: str | None = None,
+        preview_max_chars: int = 500,
+        surface_in_adk_web: bool = True,
+        name: str = "model_reasoning_telemetry_plugin",
+    ) -> None:
+        super().__init__(name=name)
+        self.reasoning_effort = reasoning_effort or os.getenv("JOB_SCRAPER_REASONING_EFFORT") or ""
+        self.preview_max_chars = max(0, preview_max_chars)
+        self.surface_in_adk_web = surface_in_adk_web
+
+    async def after_model_callback(
+        self,
+        *,
+        callback_context: Any,
+        llm_response: LlmResponse,
+    ) -> LlmResponse | None:
+        state = getattr(callback_context, "state", None)
+        if not _is_state_like(state):
+            return None
+        telemetry = _model_reasoning_telemetry(
+            llm_response,
+            reasoning_effort=self.reasoning_effort,
+            preview_max_chars=self.preview_max_chars,
+        )
+        if telemetry:
+            state[MODEL_REASONING_TELEMETRY_STATE_KEY] = telemetry
+            _attach_reasoning_telemetry_to_model_event(llm_response, telemetry)
+            if self.surface_in_adk_web:
+                _surface_reasoning_telemetry_as_adk_web_thought(llm_response, telemetry)
+        return None
+
+
 class SandboxWorkflowGuardPlugin(BasePlugin):
     """Prevent a started sandbox from becoming a premature final answer."""
 
@@ -241,6 +315,9 @@ class SandboxWorkflowGuardPlugin(BasePlugin):
             return _extraction_context_update_policy_error(tool_args, tool_context)
 
         if tool_name == "run_skill_script":
+            wrong_skill_error = _wrong_sandbox_helper_skill_policy_error(tool_args)
+            if wrong_skill_error:
+                return wrong_skill_error
             site_reference_error = _site_specific_reference_policy_error(tool_args, tool_context)
             if site_reference_error:
                 return site_reference_error
@@ -253,12 +330,21 @@ class SandboxWorkflowGuardPlugin(BasePlugin):
             missing_protocol_read_error = _missing_protocol_output_read_policy_error(tool_args, tool_context)
             if missing_protocol_read_error:
                 return missing_protocol_read_error
+            output_plan_error = _workflow_output_plan_policy_error(tool_args, tool_context)
+            if output_plan_error:
+                return output_plan_error
             protocol_write_error = _workflow_protocol_write_policy_error(tool_args, tool_context)
             if protocol_write_error:
                 return protocol_write_error
+            producer_write_error = _producer_write_after_success_policy_error(tool_args, tool_context)
+            if producer_write_error:
+                return producer_write_error
             host_control_error = _sandbox_host_control_exec_policy_error(tool_args)
             if host_control_error:
                 return host_control_error
+            compound_producer_error = _compound_producer_verification_policy_error(tool_args, tool_context)
+            if compound_producer_error:
+                return compound_producer_error
             script_execution_error = _workflow_script_execution_policy_error(tool_args, tool_context)
             if script_execution_error:
                 return script_execution_error
@@ -328,7 +414,7 @@ class SandboxWorkflowGuardPlugin(BasePlugin):
             _reset_extraction_context_update_guard(tool_context)
         if tool_name != "run_skill_script" or not _sandbox_read_signature(tool_args):
             _reset_sandbox_read_guard(tool_context)
-        if tool_name in {"fetch_page_to_workspace", "render_page_to_workspace"}:
+        if tool_name in {"fetch_page_to_workspace", "render_page_to_workspace", "load_test_fixture_page_to_workspace"}:
             _record_last_page_workspace(tool_context, result)
             return None
 
@@ -361,8 +447,17 @@ class SandboxWorkflowGuardPlugin(BasePlugin):
         if repeat_guard:
             active = state.get(ACTIVE_SANDBOX_STATE_KEY)
             if isinstance(active, dict):
-                active["status"] = "guardrail_triggered"
-                active["guardrail"] = repeat_guard["guardrail"]
+                if repeat_guard.get("terminal", True):
+                    active["status"] = "guardrail_triggered"
+                    active["guardrail"] = repeat_guard["guardrail"]
+                else:
+                    active["status"] = "running"
+                    active["last_repair_target"] = {
+                        "file_path": file_path,
+                        "artifact_hint": "accountable protocol outputs",
+                        "required_action": "agent_plan_repair",
+                        "error": str(repeat_guard.get("error") or repeat_guard.get("guardrail") or ""),
+                    }
                 state[ACTIVE_SANDBOX_STATE_KEY] = active
             return repeat_guard
         if file_path.endswith("sandbox_start.py") and payload.get("status") == "running":
@@ -381,7 +476,7 @@ class SandboxWorkflowGuardPlugin(BasePlugin):
                 )
             return _add_required_next(
                 result,
-                "Continue the sandbox workflow with the appropriate loaded sandbox tool: inspect page evidence, derive patterns, write/run extractor code, persist protocol outputs, validate, then finalize.",
+                "Continue the sandbox workflow with the appropriate loaded sandbox tool: inspect page evidence, derive repeated patterns, load bounded evidence, write supporting scripts only as needed, create accountable protocol outputs, validate, then finalize.",
             )
 
         active = state.get(ACTIVE_SANDBOX_STATE_KEY)
@@ -430,8 +525,8 @@ class SandboxWorkflowGuardPlugin(BasePlugin):
                 active["status"] = "running"
                 active["last_repair_target"] = {
                     "file_path": file_path,
-                    "producer_hint": "output/extractor.py",
-                    "required_action": "debug_repair_extractor",
+                    "artifact_hint": "accountable protocol outputs",
+                    "required_action": "agent_plan_repair",
                     "error": str(payload.get("error") or payload.get("stderr") or "sandbox finalization error"),
                 }
                 state[ACTIVE_SANDBOX_STATE_KEY] = active
@@ -451,6 +546,7 @@ class SandboxWorkflowGuardPlugin(BasePlugin):
         llm_request: LlmRequest,
     ) -> LlmResponse | None:
         state = getattr(callback_context, "state", None)
+        _prune_loaded_resource_contexts(llm_request, state)
         _inject_latest_tool_result(llm_request)
         _inject_session_extraction_context(llm_request, state)
         _inject_finalized_sandbox_persistence_guard(llm_request, state)
@@ -499,9 +595,9 @@ class SandboxWorkflowGuardPlugin(BasePlugin):
         pending_script = _pending_scripts_for_active_sandbox(state, active) if _is_state_like(state) else {}
         if pending_script:
             next_action = (
-                f"A workflow script was written but has not been verified. Run "
-                f"`python {pending_script.get('path') or 'output/extractor.py'}` with sandbox_exec.py, then verify "
-                "the required protocol artifacts exist before validate/finalize/persist/query."
+                f"A workflow helper/script was written but has not been verified. Run the relevant focused command "
+                f"for `{pending_script.get('path') or 'output/extractor.py'}` with sandbox_exec.py, then verify the "
+                "required protocol artifacts exist before validate/finalize/persist/query."
             )
         elif isinstance(active.get("last_repair_target"), dict):
             repair = active["last_repair_target"]
@@ -509,13 +605,14 @@ class SandboxWorkflowGuardPlugin(BasePlugin):
         elif command_count >= 5:
             next_action = (
                 "You likely have enough page inspection evidence. Continue the sandbox workflow by choosing the "
-                "appropriate loaded sandbox tool: write or repair extractor/protocol files, run or validate the "
-                "extractor, or finalize only if validation has passed."
+                "appropriate loaded sandbox tool: load bounded evidence or script output, write or repair accountable "
+                "protocol files or supporting scripts, validate, and finalize only if validation has passed."
             )
         else:
             next_action = (
                 "Continue the sandbox workflow by choosing the appropriate loaded sandbox tool to inspect the "
-                "mounted page, derive patterns, or write the extractor; do not answer the user yet."
+                "mounted page, derive repeated patterns, or write evidence/serialization helpers; do not answer "
+                "the user yet."
             )
         llm_request.contents.append(
             genai_types.Content(
@@ -531,7 +628,7 @@ class SandboxWorkflowGuardPlugin(BasePlugin):
                             "Do not produce a final text response while required protocol outputs are missing. "
                             "If the sandbox has guardrail_triggered, do not persist; report the guardrail blocker. "
                             "Do not use inspection commands for inline heredocs or shell snippets that write files; "
-                            "write extractor/protocol files through the sandbox file-writing capability so they are "
+                            "write helper/protocol files through the sandbox file-writing capability so they are "
                             "audited and validated. "
                             "Do not import bs4/lxml/parsel unless already verified installed in the sandbox.\n"
                             "</RUNTIME_SANDBOX_GUARD>"
@@ -655,7 +752,14 @@ class SandboxOutputGatePlugin(BasePlugin):
 
     def _should_gate(self, tool: Any, tool_args: dict[str, Any], result: dict[str, Any]) -> bool:
         tool_name = getattr(tool, "name", "")
-        if tool_name in {"run_skill_script", "fetch_page", "render_page", "fetch_page_to_workspace", "render_page_to_workspace"}:
+        if tool_name in {
+            "run_skill_script",
+            "fetch_page",
+            "render_page",
+            "fetch_page_to_workspace",
+            "render_page_to_workspace",
+            "load_test_fixture_page_to_workspace",
+        }:
             return True
         if tool_args.get("skill_name") == "sandbox-page-analyst":
             return True
@@ -663,7 +767,7 @@ class SandboxOutputGatePlugin(BasePlugin):
 
 
 class SandboxNoteRefinementPlugin(BasePlugin):
-    """Periodically summarize sandbox command batches and inject notes into model requests."""
+    """Periodically summarize workflow tool events and inject notes into model requests."""
 
     def __init__(
         self,
@@ -690,20 +794,16 @@ class SandboxNoteRefinementPlugin(BasePlugin):
         tool_context: Any,
         result: dict,
     ) -> dict | None:
-        if getattr(tool, "name", "") != "run_skill_script" or tool_args.get("skill_name") != "sandbox-page-analyst":
-            return None
-        file_path = str(tool_args.get("file_path") or "")
-        if not file_path.endswith("sandbox_exec.py"):
-            return None
         state = getattr(tool_context, "state", None)
         if not _is_state_like(state):
             return None
 
-        payload = _parse_skill_script_stdout(result)
-        audit_id = str(payload.get("audit_id") or _extract_audit_id(payload) or "")
-        command_index = int(payload.get("command_index") or 0)
-        if not audit_id:
+        event = _workflow_tool_event_note_source(tool, tool_args, result, state)
+        if not event:
             return None
+        audit_id = str(event.get("note_group") or event.get("audit_id") or WORKFLOW_EVENT_GROUP)
+        event_index = int(event.get("event_index") or 0)
+        command_index = int(event.get("command_index") or 0)
 
         buffers = state.setdefault(SANDBOX_NOTE_BUFFER_STATE_KEY, {})
         if not isinstance(buffers, dict):
@@ -713,29 +813,33 @@ class SandboxNoteRefinementPlugin(BasePlugin):
         if not isinstance(buffer, list):
             buffer = []
             buffers[audit_id] = buffer
-        buffer.append(_sandbox_command_note_source(payload, file_path))
+        buffer.append(event)
 
-        # Keep the newest command response full. When command N+1 arrives,
-        # summarize the previous N responses and leave command N+1 unsummarized.
+        # Keep the newest event response full. When event N+1 arrives,
+        # summarize the previous N responses and leave event N+1 unsummarized.
         if len(buffer) <= self.command_interval:
             return None
 
-        ordered_buffer = sorted(buffer, key=_sandbox_command_sort_key)
-        commands_to_summarize = list(ordered_buffer[: self.command_interval])
-        remaining_commands = list(ordered_buffer[self.command_interval :])
-        buffers[audit_id] = remaining_commands
+        ordered_buffer = sorted(buffer, key=_workflow_event_sort_key)
+        events_to_summarize = list(ordered_buffer[: self.command_interval])
+        remaining_events = list(ordered_buffer[self.command_interval :])
+        buffers[audit_id] = remaining_events
+        kept_full_event_index = int(
+            (remaining_events[-1] if remaining_events else events_to_summarize[-1]).get("event_index")
+            or event_index
+        )
         kept_full_command_index = int(
-            (remaining_commands[-1] if remaining_commands else commands_to_summarize[-1]).get("command_index")
+            (remaining_events[-1] if remaining_events else events_to_summarize[-1]).get("command_index")
             or command_index
         )
         try:
             current_notes = state.get(SANDBOX_NOTES_STATE_KEY)
             visible_notes = current_notes[-self.max_notes :] if isinstance(current_notes, list) else []
-            summary = await self._summarize(audit_id, commands_to_summarize, visible_notes)
+            summary = await self._summarize(audit_id, events_to_summarize, visible_notes)
         except Exception as exc:  # Do not fail the user workflow because note refinement failed.
             errors = state.setdefault(SANDBOX_NOTE_ERROR_STATE_KEY, [])
             if isinstance(errors, list):
-                errors.append({"audit_id": audit_id, "command_index": command_index, "error": str(exc)})
+                errors.append({"audit_id": audit_id, "event_index": event_index, "command_index": command_index, "error": str(exc)})
             return None
 
         notes = state.setdefault(SANDBOX_NOTES_STATE_KEY, [])
@@ -745,13 +849,17 @@ class SandboxNoteRefinementPlugin(BasePlugin):
         notes.append(
             {
                 "audit_id": audit_id,
-                "through_command_index": int(commands_to_summarize[-1].get("command_index") or command_index),
+                "through_event_index": int(events_to_summarize[-1].get("event_index") or event_index),
+                "kept_full_event_index": kept_full_event_index,
+                "through_command_index": int(events_to_summarize[-1].get("command_index") or command_index),
                 "kept_full_command_index": kept_full_command_index,
+                "event_count": len(events_to_summarize),
                 "summary": summary,
             }
         )
         del notes[:-self.max_notes]
-        _mark_summarized_commands(state, audit_id, commands_to_summarize)
+        _mark_summarized_workflow_events(state, events_to_summarize)
+        _mark_summarized_commands(state, audit_id, events_to_summarize)
         return None
 
     async def before_model_callback(
@@ -768,6 +876,7 @@ class SandboxNoteRefinementPlugin(BasePlugin):
         visible_notes = notes[-self.max_notes :] if isinstance(notes, list) else []
 
         if self.prune_completed_sandbox_context:
+            _prune_summarized_workflow_events(llm_request, visible_notes, state)
             _prune_summarized_sandbox_contexts(llm_request, visible_notes, state)
             _prune_completed_sandbox_contexts(llm_request, visible_notes)
 
@@ -779,7 +888,7 @@ class SandboxNoteRefinementPlugin(BasePlugin):
                         genai_types.Part.from_text(
                             text=(
                                 "<RUNTIME_SANDBOX_NOTES>\n"
-                                "purpose: supporting evidence from compacted sandbox command history.\n"
+                                "purpose: supporting evidence from compacted ADK workflow/tool history.\n"
                                 "priority: evidence only, not workflow authority.\n"
                                 "usage: use these notes to recover prior facts and compare against current results. "
                                 "If they conflict with SESSION_EXTRACTION_CONTEXT, verify with exact tool output when "
@@ -798,14 +907,14 @@ class SandboxNoteRefinementPlugin(BasePlugin):
     async def _summarize(
         self,
         audit_id: str,
-        commands: list[dict[str, Any]],
+        events: list[dict[str, Any]],
         current_notes: list[Any],
     ) -> str:
         if self.summarizer is not None:
             try:
-                maybe = self.summarizer(audit_id, current_notes, commands)
+                maybe = self.summarizer(audit_id, current_notes, events)
             except TypeError:
-                maybe = self.summarizer(audit_id, commands)
+                maybe = self.summarizer(audit_id, events)
             if inspect.isawaitable(maybe):
                 return str(await maybe)
             return str(maybe)
@@ -813,14 +922,15 @@ class SandboxNoteRefinementPlugin(BasePlugin):
         from litellm import acompletion
 
         prompt = (
-            "Summarize these sandbox command results for a job-page extraction agent. "
-            "Fuse the current notes with the command results, and return one concise updated note. "
+            "Summarize these ADK workflow tool results for a job-page extraction agent. "
+            "Fuse the current notes with the tool results, and return one concise updated note. "
+            "The note must be under 200 words. "
             "Focus on: observations, extraction_plan implications, "
             "result-vs-requirement comparison, errors, artifact paths, and next repair facts. "
             "Do not invent page facts. Do not include raw HTML or long stdout.\n\n"
             f"audit_id: {audit_id}\n"
             f"current_notes_json: {_preview(json.dumps(current_notes, ensure_ascii=True, sort_keys=True, default=str), 6_000)}\n"
-            f"commands_json: {_preview(json.dumps(commands, ensure_ascii=True, sort_keys=True, default=str), 12_000)}"
+            f"events_json: {_preview(json.dumps(events, ensure_ascii=True, sort_keys=True, default=str), 12_000)}"
         )
         response = await acompletion(
             model=self.model,
@@ -994,7 +1104,6 @@ def _sandbox_repeat_guard_result(
         return None
 
     guarded = dict(payload)
-    guarded["status"] = "guardrail_triggered"
     guarded["audit_id"] = audit_id
     guarded["guardrail"] = "repeated_sandbox_tool_result"
     guarded["error"] = f"Repeated {label} {count} times for audit {audit_id}."
@@ -1002,6 +1111,18 @@ def _sandbox_repeat_guard_result(
     guarded["original_status"] = status
     guarded["original_error"] = payload.get("error", "")
     guarded["file_path"] = file_path
+    if file_path.endswith("sandbox_write_file.py") and status == "success":
+        guarded["status"] = "error"
+        guarded["terminal"] = False
+        guarded["required_next"] = (
+            "Stop rewriting the same successful sandbox file content. If required protocol outputs exist, run "
+            "scripts/validate_outputs.py and then scripts/sandbox_finalize.py. If a concrete validation/finalization "
+            "error is already active, load/cite the missing evidence or revise the accountable output before "
+            "writing changed content."
+        )
+    else:
+        guarded["status"] = "guardrail_triggered"
+        guarded["terminal"] = True
     return guarded
 
 
@@ -1119,9 +1240,10 @@ def _repeated_inspection_policy_error(
             "workflow-changing action happened afterward. Repeating the same inspection will not advance the task."
         ),
         "required_next": (
-            "Use the previous inspection result to choose a progress action: write or patch output/extractor.py, "
-            "run the extractor, validate outputs, finalize, promote, or update_extraction_context with new evidence "
-            "and a different planned_next_tool. Do not call the same inspection again."
+            "Use the previous inspection result to choose a progress action: load bounded evidence, write or patch "
+            "a supporting script, revise accountable protocol outputs, validate outputs, finalize, "
+            "promote, or update_extraction_context with new evidence and a different planned_next_tool. Do not call "
+            "the same inspection again."
         ),
         "count": 0,
         "written_count": 0,
@@ -1192,8 +1314,8 @@ def _planned_next_tool_update_policy_error(tool_args: dict[str, Any], tool_conte
             ),
             "required_next": (
                 "Call update_extraction_context again with planned_next_tool containing at least tool_name. "
-                "For sandbox helper calls, include skill_name and file_path. For producer repairs, include "
-                "target_paths such as [\"output/extractor.py\"]."
+                "For sandbox helper calls, include skill_name and file_path. For writes or patches, include "
+                "target_paths such as [\"output/candidates.json\"] or [\"output/write_outputs.py\"]."
             ),
             "count": 0,
             "written_count": 0,
@@ -1218,7 +1340,7 @@ def _workflow_contract_policy_error(
     if not _is_workflow_contract_required_tool(tool_name, tool_args, tool_context):
         return None
     if _has_workflow_contract(tool_context):
-        return _workflow_extractor_source_policy_error(tool_args, tool_context)
+        return None
     return _workflow_contract_required_error(
         _active_repair_audit_id(tool_context),
         (
@@ -1241,13 +1363,10 @@ def _workflow_contract_update_policy_error(tool_args: dict[str, Any], tool_conte
         )
     contract = tool_args.get("workflow_contract")
     if isinstance(contract, dict):
-        producer = _normalize_skill_path(str(contract.get("producer") or ""))
-        if producer and producer != WORKFLOW_PRODUCER_PATH:
-            return _workflow_contract_required_error(
-                str(tool_args.get("audit_id") or _active_repair_audit_id(tool_context) or ""),
-                f"workflow_contract.producer must be {WORKFLOW_PRODUCER_PATH}.",
-                {"producer": producer},
-            )
+        # Workflow contracts are intentionally role-based. Older contracts may
+        # still include a producer path, but the runtime must not force the LLM
+        # extraction workflow back into one semantic producer script.
+        pass
     return None
 
 
@@ -1273,8 +1392,10 @@ def _is_workflow_contract_required_tool(tool_name: str, tool_args: dict[str, Any
     file_path = _normalize_skill_path(str(tool_args.get("file_path") or ""))
     if file_path == "scripts/sandbox_start.py":
         return _sandbox_start_mode(tool_args) == "workflow"
-    if file_path == "scripts/sandbox_write_file.py" and _sandbox_write_target_path(tool_args) == WORKFLOW_PRODUCER_PATH:
-        return _has_active_workflow_sandbox(tool_context)
+    if file_path == "scripts/sandbox_write_file.py":
+        target_path = _sandbox_write_target_path(tool_args)
+        if target_path == WORKFLOW_PRODUCER_PATH or target_path in REQUIRED_WORKFLOW_PROTOCOL_OUTPUTS:
+            return _has_active_workflow_sandbox(tool_context)
     if file_path == "scripts/sandbox_exec.py" and _sandbox_exec_runs_producer(tool_args):
         return _has_active_workflow_sandbox(tool_context)
     if file_path in {"scripts/validate_outputs.py", "scripts/sandbox_finalize.py"}:
@@ -1303,77 +1424,6 @@ def _missing_workflow_contract_outputs(required_outputs: Any, workflow_contract:
     return [path for path in REQUIRED_WORKFLOW_PROTOCOL_OUTPUTS if path not in declared]
 
 
-def _workflow_extractor_source_policy_error(tool_args: dict[str, Any], tool_context: Any) -> dict[str, Any] | None:
-    if tool_args.get("skill_name") != "sandbox-page-analyst":
-        return None
-    file_path = _normalize_skill_path(str(tool_args.get("file_path") or ""))
-    if file_path != "scripts/sandbox_write_file.py" or _sandbox_write_target_path(tool_args) != WORKFLOW_PRODUCER_PATH:
-        return None
-    args = [str(item) for item in tool_args.get("args") or [] if item is not None]
-    content = _option_value(args, "--content")
-    missing = [
-        path
-        for path in REQUIRED_WORKFLOW_PROTOCOL_OUTPUTS
-        if not _producer_source_mentions_output_path(content, path)
-    ]
-    if not missing:
-        placeholder_reason = _placeholder_extractor_source_reason(content)
-        if not placeholder_reason:
-            return None
-        return _workflow_contract_required_error(
-            _active_repair_audit_id(tool_context),
-            (
-                f"{WORKFLOW_PRODUCER_PATH} must implement evidence-backed extraction logic, not a placeholder "
-                "protocol producer. Inspect page evidence, encode the recurring job-post pattern, and write real "
-                "candidate data before running validation."
-            ),
-            {"placeholder_source_reason": placeholder_reason},
-        )
-    return _workflow_contract_required_error(
-        _active_repair_audit_id(tool_context),
-        (
-            f"{WORKFLOW_PRODUCER_PATH} must be a protocol producer, not a stdout-only extractor. "
-            "Its source must write every required protocol output in one run. The source can use direct "
-            "`output/<name>.json` strings or normal Python path composition under the `output/` directory."
-        ),
-        {"missing_outputs_in_source": missing},
-    )
-
-
-def _producer_source_mentions_output_path(content: str, path: str) -> bool:
-    if path in content:
-        return True
-    directory, _, filename = path.rpartition("/")
-    if not directory or not filename:
-        return False
-    return directory in content and filename in content
-
-
-def _placeholder_extractor_source_reason(content: str) -> str:
-    lowered = content.lower()
-    explicit_markers = {
-        "placeholder producer",
-        "minimal placeholder",
-        "stub producer",
-        "'status': 'stub'",
-        '"status": "stub"',
-        "stub producer",
-    }
-    for marker in explicit_markers:
-        if marker in lowered:
-            return f"source contains placeholder marker {marker!r}"
-
-    compact = re.sub(r"\s+", "", lowered)
-    if (
-        ("'jobs':[]" in compact or '"jobs":[]' in compact or "jobs=[]" in compact)
-        and "page.html" not in lowered
-        and "beautifulsoup" not in lowered
-        and "parsel" not in lowered
-    ):
-        return "source emits an empty jobs payload without reading page evidence"
-    return ""
-
-
 def _sandbox_start_mode(tool_args: dict[str, Any]) -> str:
     args = [str(item) for item in tool_args.get("args") or [] if item is not None]
     return str(_option_value(args, "--mode") or "workflow")
@@ -1382,6 +1432,54 @@ def _sandbox_start_mode(tool_args: dict[str, Any]) -> str:
 def _sandbox_exec_runs_producer(tool_args: dict[str, Any]) -> bool:
     command = _sandbox_exec_command(tool_args).replace("/workspace/", "").replace("./", "")
     return f"python {WORKFLOW_PRODUCER_PATH}" in command or f"python3 {WORKFLOW_PRODUCER_PATH}" in command
+
+
+def _compound_producer_verification_policy_error(tool_args: dict[str, Any], tool_context: Any) -> dict[str, Any] | None:
+    if tool_args.get("skill_name") != "sandbox-page-analyst":
+        return None
+    file_path = _normalize_skill_path(str(tool_args.get("file_path") or ""))
+    if file_path != "scripts/sandbox_exec.py":
+        return None
+    if not _has_active_workflow_sandbox(tool_context) or not _sandbox_exec_runs_producer(tool_args):
+        return None
+    command = _sandbox_exec_command(tool_args)
+    if not _is_compound_producer_verification_command(command):
+        return None
+    audit_id = _active_repair_audit_id(tool_context)
+    return {
+        "status": "error",
+        "error_type": "workflow_execution_policy",
+        "guardrail": "compound_producer_verification_command",
+        "audit_id": audit_id,
+        "terminal": False,
+        "error": (
+            "Do not combine output/extractor.py execution with compilation, inline Python inspection, file reads, "
+            "or validator/finalizer work in one sandbox_exec command. A chained producer verification command can "
+            "hit per-command or command-budget guardrails before the runtime can observe progress."
+        ),
+        "received_command": command,
+        "required_next": (
+            "Split this into short observable steps: first run exactly `python output/extractor.py` with "
+            "scripts/sandbox_exec.py; then, if needed, run a separate bounded inspection command; then call "
+            "scripts/validate_outputs.py with --audit-id; then call scripts/sandbox_finalize.py with --audit-id."
+        ),
+    }
+
+
+def _is_compound_producer_verification_command(command: str) -> bool:
+    normalized = command.replace("/workspace/", "").replace("./", "")
+    if not re.search(r"\bpython3?\s+output/extractor\.py\b", normalized):
+        return False
+    if "py_compile" in normalized:
+        return True
+    if "<<" in normalized:
+        return True
+    if "&&" in normalized or "||" in normalized or ";" in normalized:
+        return True
+    if "\n" in normalized.strip():
+        return True
+    python_invocations = re.findall(r"\bpython3?\b", normalized)
+    return len(python_invocations) > 1
 
 
 def _has_active_workflow_sandbox(tool_context: Any) -> bool:
@@ -1408,9 +1506,9 @@ def _workflow_contract_required_error(
         "required_next": (
             "Call update_extraction_context with required_outputs and workflow_contract before continuing. "
             "Use top-level required_outputs and workflow_contract.required_outputs with every required protocol "
-            "path. workflow_contract should name producer output/extractor.py, state that output/extractor.py "
-            "creates them in one extraction pass, and state that missing/invalid outputs are repaired at the "
-            "producer. Do not put the paths only under keys such as must_create_in_one_pass."
+            "path. workflow_contract should state that the agent chooses and owns the extraction method, supporting "
+            "scripts may inspect/parse/extract/validate/serialize when recorded, and validation/finalization are the success gate. "
+            "Do not put the paths only under keys such as must_create_in_one_pass."
         ),
         "count": 0,
         "written_count": 0,
@@ -1522,10 +1620,15 @@ def _active_planned_next_tool(tool_context: Any) -> dict[str, Any] | None:
 
 
 def _planned_tool_matches(expected: dict[str, Any], tool_name: str, tool_args: dict[str, Any]) -> bool:
-    if _normalize_tool_name(str(expected.get("tool_name") or "")) != _normalize_tool_name(tool_name):
+    normalized_tool_name = _normalize_tool_name(tool_name)
+    if _normalize_tool_name(str(expected.get("tool_name") or "")) != normalized_tool_name:
         return False
 
-    if "skill_name" in expected and str(expected.get("skill_name") or "") != str(tool_args.get("skill_name") or ""):
+    if (
+        "skill_name" in expected
+        and (normalized_tool_name in {"load_skill", "run_skill_script"} or "skill_name" in tool_args)
+        and str(expected.get("skill_name") or "") != str(tool_args.get("skill_name") or "")
+    ):
         return False
 
     if "file_path" in expected:
@@ -1563,11 +1666,60 @@ def _planned_next_tool_allows_intervening_inspection(tool_name: str, tool_args: 
     """Allow read-only inspection without consuming or changing the declared next action."""
 
     policy = resolve_tool_policy(tool_name, tool_args)
-    return policy.kind in {
+    if policy.kind in {
         ToolActionKind.REFERENCE_READ,
         ToolActionKind.WORKSPACE_READ,
         ToolActionKind.SANDBOX_READ,
-    }
+    }:
+        return True
+    if policy.kind == ToolActionKind.SANDBOX_EXEC:
+        return _sandbox_exec_is_read_only_probe(tool_args)
+    return False
+
+
+def _sandbox_exec_is_read_only_probe(tool_args: dict[str, Any]) -> bool:
+    """Best-effort classifier for sandbox_exec commands that only inspect evidence."""
+
+    command = _sandbox_exec_command(tool_args)
+    if not command.strip():
+        return False
+    lowered = command.lower()
+    write_markers = (
+        ".write_text(",
+        ".write_bytes(",
+        "open(",
+        "json.dump(",
+        "pickle.dump(",
+        "shutil.",
+        "mkdir",
+        "touch ",
+        "rm ",
+        "mv ",
+        "cp ",
+        "tee ",
+        "sed -i",
+        "cat >",
+        ">>",
+    )
+    if any(marker in lowered for marker in write_markers):
+        return False
+    if re.search(r"(?<!<)>(?!>)", command):
+        return False
+    read_markers = (
+        "print(",
+        "read_text(",
+        "read_bytes(",
+        "beautifulsoup",
+        "select(",
+        "find_all(",
+        "sed -n",
+        "ls ",
+        "find ",
+        "grep ",
+        "rg ",
+        "jq ",
+    )
+    return any(marker in lowered for marker in read_markers)
 
 
 def _repair_scope_policy_error(
@@ -1592,7 +1744,7 @@ def _repair_scope_policy_error(
 
     file_path = _normalize_skill_path(str(tool_args.get("file_path") or ""))
     if file_path == "scripts/sandbox_read.py":
-        return _repair_scope_sandbox_read_error(tool_args, tool_context, scope)
+        return None
     if file_path == "scripts/sandbox_apply_patch.py":
         return _repair_scope_patch_error(tool_args, tool_context, scope)
     if file_path == "scripts/sandbox_exec.py":
@@ -1639,6 +1791,18 @@ def _repair_scope_update_policy_error(tool_args: dict[str, Any], tool_context: A
                 "Use repair_scope.verification; repair_scope.verification_command is accepted as a compatibility alias."
             ),
         )
+    verification = _repair_scope_verification_command(repair_scope)
+    if verification and _is_compound_producer_verification_command(verification):
+        return _repair_scope_error(
+            audit_id,
+            "compound_repair_scope_verification_command",
+            (
+                "repair_scope.verification must be one short observable command. For output/extractor.py repairs, "
+                "set verification to exactly `python output/extractor.py`; inspect generated files or run "
+                "validator/finalizer in later tool calls."
+            ),
+            {"verification": verification},
+        )
     return None
 
 
@@ -1657,29 +1821,6 @@ def _repair_scope_resource_error(tool_args: dict[str, Any], tool_context: Any, s
             "Update repair_scope first if new evidence proves this resource is needed."
         ),
         {"requested_resource": requested, "allowed_resources": sorted(allowed)},
-    )
-
-
-def _repair_scope_sandbox_read_error(
-    tool_args: dict[str, Any],
-    tool_context: Any,
-    scope: dict[str, Any],
-) -> dict[str, Any] | None:
-    allowed = _normalized_scope_paths(scope.get("allowed_inspections"))
-    if not allowed:
-        return None
-    args = [str(item) for item in tool_args.get("args") or [] if item is not None]
-    requested = _normalize_skill_path(_option_value(args, "--path"))
-    if requested in allowed:
-        return None
-    return _repair_scope_error(
-        _active_repair_audit_id(tool_context),
-        "repair_scope_inspection_not_allowed",
-        (
-            f"Sandbox read target {requested or '<unknown>'} is outside repair_scope.allowed_inspections. "
-            "Keep the current repair focused, or update repair_scope first with the reason this inspection is needed."
-        ),
-        {"requested_path": requested, "allowed_inspections": sorted(allowed)},
     )
 
 
@@ -2091,6 +2232,32 @@ def _sandbox_host_control_exec_policy_error(tool_args: dict[str, Any]) -> dict[s
     }
 
 
+def _wrong_sandbox_helper_skill_policy_error(tool_args: dict[str, Any]) -> dict[str, Any] | None:
+    if tool_args.get("skill_name") != "sandbox-extraction-debugger":
+        return None
+    file_path = _normalize_skill_path(str(tool_args.get("file_path") or ""))
+    if not file_path.startswith("scripts/"):
+        return None
+    return {
+        "status": "error",
+        "error_type": "sandbox_helper_skill_policy",
+        "guardrail": "sandbox_helpers_live_under_page_analyst_skill",
+        "requested_skill_name": "sandbox-extraction-debugger",
+        "file_path": file_path,
+        "count": 0,
+        "written_count": 0,
+        "error": (
+            "sandbox-extraction-debugger is an instruction skill, not the owner of sandbox helper scripts. "
+            f"{file_path} must be invoked through the sandbox-page-analyst skill."
+        ),
+        "required_next": (
+            'Retry the helper call with tool_name "run_skill_script", skill_name "sandbox-page-analyst", '
+            f'and file_path "{file_path}". Keep using the sandbox-extraction-debugger instructions to decide '
+            "what to inspect or patch."
+        ),
+    }
+
+
 def _sandbox_skill_script_args_policy_error(tool_args: dict[str, Any], tool_context: Any) -> dict[str, Any] | None:
     if tool_args.get("skill_name") != "sandbox-page-analyst":
         return None
@@ -2207,10 +2374,10 @@ def _missing_protocol_output_read_policy_error(tool_args: dict[str, Any], tool_c
             "Reading it again cannot repair the workflow."
         ),
         "required_next": (
-            "Load `sandbox-extraction-debugger` if not loaded, inspect `output/extractor.py` and any available "
-            "producer outputs, then patch `output/extractor.py` so running `python output/extractor.py` writes the "
-            f"missing protocol file `{read_path}` plus the other required outputs. Rerun the extractor before "
-            "validate/finalize."
+            "Load `sandbox-extraction-debugger` if not loaded, inspect the evidence index/chunks, current "
+            "protocol outputs, run record, script manifest, and any serialization helper. Then create or repair "
+            f"the missing accountable protocol file `{read_path}` from inspected evidence/script output, with field rationale and evidence refs where "
+            "applicable, before validate/finalize."
         ),
         "count": 0,
         "written_count": 0,
@@ -2260,21 +2427,643 @@ def _workflow_protocol_write_policy_error(tool_args: dict[str, Any], tool_contex
     if not isinstance(active, dict) or str(active.get("mode") or "workflow") != "workflow":
         return None
 
+    return _expected_output_protocol_write_policy_error(tool_args, tool_context, target_path, active)
+
+
+def _workflow_output_plan_policy_error(tool_args: dict[str, Any], tool_context: Any) -> dict[str, Any] | None:
+    if tool_args.get("skill_name") != "sandbox-page-analyst":
+        return None
+    file_path = _normalize_skill_path(str(tool_args.get("file_path") or ""))
+    if file_path != "scripts/sandbox_write_file.py":
+        return None
+
+    target_path = _sandbox_write_target_path(tool_args)
+    if not _requires_producer_output_plan(target_path):
+        return None
+
+    state = getattr(tool_context, "state", None)
+    if not _is_state_like(state):
+        return None
+    active = state.get(ACTIVE_SANDBOX_STATE_KEY)
+    if not isinstance(active, dict) or str(active.get("mode") or "workflow") != "workflow":
+        return None
+    context = state.get(SESSION_EXTRACTION_CONTEXT_STATE_KEY)
+    if not isinstance(context, dict):
+        return None
+    if _has_producer_output_plan(context):
+        return None
+
+    audit_id = str(active.get("audit_id") or context.get("audit_id") or "")
+    has_contract = isinstance(context.get("output_contract"), dict) and bool(context.get("output_contract"))
+    required_next_tool: dict[str, Any]
+    if has_contract:
+        required_next_tool = {
+            "tool_name": "update_extraction_context",
+            "producer_output_plan": {
+                "required_outputs": list(REQUIRED_WORKFLOW_PROTOCOL_OUTPUTS),
+                "extraction_run": {
+                    "required": ["observations", "chosen_strategy", "expected_output"],
+                },
+                "candidates_json": {
+                    "required_top_level": ["source", "jobs", "selectors", "crawl", "warnings"],
+                },
+                "final_json": {
+                    "required_top_level": ["status", "output_schema", "summary", "result"],
+                },
+                "script_manifest": {
+                    "required_if_supporting_scripts_authored": True,
+                    "requires_workflow_or_reference_version": True,
+                    "requires_reuse_classification": True,
+                },
+                "validation_plan": [
+                    "run scripts/validate_outputs.py",
+                    "run scripts/sandbox_finalize.py after validation succeeds",
+                ],
+            },
+        }
+    else:
+        required_next_tool = {
+            "tool_name": "run_skill_script",
+            "skill_name": "sandbox-page-analyst",
+            "file_path": "scripts/protocol_contract.py",
+            "args": [],
+        }
+    return {
+        "status": "error",
+        "error_type": "producer_output_plan_policy",
+        "guardrail": "producer_output_plan_required",
+        "audit_id": audit_id,
+        "path": target_path,
+        "error": (
+            f"Before writing {target_path}, load the compact protocol contract and have the agent record "
+            "producer_output_plan in SESSION_EXTRACTION_CONTEXT. This prevents discovering required output "
+            "fields one validator error at a time."
+        ),
+        "unsatisfied_requirements": [
+            {
+                "id": "producer_output_plan_recorded_before_authoring_outputs",
+                "path": target_path,
+                "missing": "output_contract and producer_output_plan",
+                "agent_responsibility": (
+                    "Use scripts/protocol_contract.py as compact contract input, then write the agent's own "
+                    "plan for extraction_run, candidates/final envelopes, script manifest, and validation."
+                ),
+            }
+        ],
+        "required_next_tool": required_next_tool,
+        "required_next": (
+            "If output_contract is missing, call scripts/protocol_contract.py. Then call update_extraction_context "
+            "with output_contract and a producer_output_plan that the agent derives from the contract and current "
+            "observations. Do not retry the write until producer_output_plan is present."
+        ),
+        "count": 0,
+        "written_count": 0,
+    }
+
+
+def _requires_producer_output_plan(target_path: str) -> bool:
+    normalized = _normalize_skill_path(target_path)
+    if normalized in REQUIRED_WORKFLOW_PROTOCOL_OUTPUTS:
+        return True
+    if normalized == "output/script_manifest.json":
+        return True
+    return normalized.startswith("output/") and normalized.endswith(".py")
+
+
+def _has_producer_output_plan(context: dict[str, Any]) -> bool:
+    return bool(isinstance(context.get("output_contract"), dict) and context.get("output_contract")) and bool(
+        isinstance(context.get("producer_output_plan"), dict) and context.get("producer_output_plan")
+    )
+
+
+def _expected_output_protocol_write_policy_error(
+    tool_args: dict[str, Any],
+    tool_context: Any,
+    target_path: str,
+    active: dict[str, Any],
+) -> dict[str, Any] | None:
+    if target_path not in {"output/candidates.json", "output/final.json"}:
+        return None
+
+    state = getattr(tool_context, "state", None)
+    if not _is_state_like(state):
+        return None
+    context = state.get(SESSION_EXTRACTION_CONTEXT_STATE_KEY)
+    if not isinstance(context, dict):
+        return None
+    payload = _sandbox_write_json_payload(tool_args)
+    if not isinstance(payload, dict):
+        return None
+    if _payload_declares_non_success_review(payload):
+        return None
+
+    expected_output = context.get("expected_output")
+    if not isinstance(expected_output, dict):
+        return _expected_output_required_error(target_path, active, context)
+    expected_job_count = _expected_output_job_count(expected_output)
+    if expected_job_count is None:
+        return _expected_output_required_error(target_path, active, context)
+    explanation_error = _expected_output_count_explanation_error(
+        target_path=target_path,
+        active=active,
+        context=context,
+        expected_output=expected_output,
+    )
+    if explanation_error:
+        return explanation_error
+    actual_job_count = _protocol_payload_job_count(payload)
+    if actual_job_count is None or actual_job_count == expected_job_count:
+        return _expected_output_field_availability_error(
+            target_path=target_path,
+            active=active,
+            context=context,
+            expected_output=expected_output,
+            payload=payload,
+        )
+
+    audit_id = str(active.get("audit_id") or context.get("audit_id") or "")
+    count_basis = str(expected_output.get("count_basis") or expected_output.get("basis") or "").strip()
+    unsatisfied = _expected_output_count_requirement(
+        expected_job_count=expected_job_count,
+        actual_job_count=actual_job_count,
+        count_basis=count_basis,
+        target_path=target_path,
+    )
+    return {
+        "status": "error",
+        "error_type": "expected_output_policy",
+        "guardrail": "expected_output_count_mismatch",
+        "audit_id": audit_id,
+        "path": target_path,
+        "expected_job_count": expected_job_count,
+        "actual_job_count": actual_job_count,
+        "count_basis": count_basis,
+        "error": (
+            f"The agent declared expected_output.expected_job_count={expected_job_count}, "
+            f"but {target_path} contains {actual_job_count} jobs."
+        ),
+        "unsatisfied_requirements": [unsatisfied],
+        "required_next": (
+            "Use unsatisfied_requirements to choose and record the next action. Do not repeat the rejected "
+            "successful output unchanged. Inspect the past observations/tool results that established "
+            "expected_output, inspect the currently available tools/resources, and use the same evidence basis "
+            "to plan extraction for every expected unit. Satisfy the missing prerequisite, revise expected_output "
+            "with evidence-backed filtering, or write needs_review with rationale."
+        ),
+        "count": 0,
+        "written_count": 0,
+    }
+
+
+def _expected_output_required_error(
+    target_path: str,
+    active: dict[str, Any],
+    context: dict[str, Any],
+) -> dict[str, Any]:
+    audit_id = str(active.get("audit_id") or context.get("audit_id") or "")
+    return {
+        "status": "error",
+        "error_type": "expected_output_policy",
+        "guardrail": "expected_output_required",
+        "audit_id": audit_id,
+        "path": target_path,
+        "error": (
+            f"Before writing {target_path}, the agent must declare expected_output.expected_job_count "
+            "derived from its repeated-pattern observations."
+        ),
+        "unsatisfied_requirements": [
+            {
+                "id": "expected_output_declared_before_success_output",
+                "path": target_path,
+                "missing": "expected_output.expected_job_count",
+                "agent_responsibility": (
+                    "Infer the expected output contract from observations before authoring successful "
+                    "candidates/final protocol output."
+                ),
+                "acceptable_resolutions": [
+                    "Declare expected_output from repeated-unit observations, then author matching output.",
+                    "Write needs_review with evidence-backed rationale if the expected output cannot be determined.",
+                ],
+            }
+        ],
+        "required_next": (
+            "Use unsatisfied_requirements to decide and record the next action before retrying a successful "
+            "protocol output write."
+        ),
+        "count": 0,
+        "written_count": 0,
+    }
+
+
+def _expected_output_count_explanation_error(
+    *,
+    target_path: str,
+    active: dict[str, Any],
+    context: dict[str, Any],
+    expected_output: dict[str, Any],
+) -> dict[str, Any] | None:
+    has_basis = bool(str(expected_output.get("count_basis") or expected_output.get("basis") or "").strip())
+    has_rationale = any(
+        str(expected_output.get(key) or "").strip()
+        for key in ("count_rationale", "count_derivation", "how_known")
+    )
+    if has_basis and has_rationale:
+        return None
+
+    missing = []
+    if not has_basis:
+        missing.append("count_basis")
+    if not has_rationale:
+        missing.append("count_rationale")
+    audit_id = str(active.get("audit_id") or context.get("audit_id") or "")
+    return {
+        "status": "error",
+        "error_type": "expected_output_policy",
+        "guardrail": "expected_output_count_explanation_required",
+        "audit_id": audit_id,
+        "path": target_path,
+        "missing": missing,
+        "error": (
+            "Before writing successful candidates/final output, expected_output must explain how the agent "
+            "knows the expected job count from its past observations/actions."
+        ),
+        "unsatisfied_requirements": [
+            {
+                "id": "expected_output_count_derivation_recorded",
+                "path": target_path,
+                "missing": missing,
+                "invariant": "The expected output count must be justified before it is enforced.",
+                "agent_responsibility": (
+                    "Inspect prior observations, attempted_actions, last_result, and relevant tool outputs. "
+                    "Record how those past actions established the expected repeated-unit count, then use "
+                    "that same basis to plan extraction."
+                ),
+                "acceptable_resolutions": [
+                    "Update expected_output with count_basis and count_rationale derived from prior observations/actions.",
+                    "Write needs_review if the expected count cannot be justified from available evidence.",
+                ],
+            }
+        ],
+        "required_next": (
+            "Record the count derivation up front in expected_output before retrying a successful protocol "
+            "output write. Include the observation/tool-result basis and how it implies the expected count."
+        ),
+        "count": 0,
+        "written_count": 0,
+    }
+
+
+def _expected_output_count_requirement(
+    *,
+    expected_job_count: int,
+    actual_job_count: int,
+    count_basis: str,
+    target_path: str,
+) -> dict[str, Any]:
+    return {
+        "id": "successful_output_matches_expected_job_count",
+        "path": target_path,
+        "expected_job_count": expected_job_count,
+        "actual_job_count": actual_job_count,
+        "count_basis": count_basis,
+        "invariant": (
+            "A successful candidates/final output must account for every job unit the agent decided is in scope."
+        ),
+        "agent_responsibility": (
+            "Reason from the current context to identify the missing prerequisite. First inspect the "
+            "observations, attempted actions, last_result, and count_basis that caused the agent to expect "
+            "this many jobs; then inspect available tools/resources and derive an extraction plan from the "
+            "same repeated-unit evidence. If the agent has not seen enough exact evidence to author every "
+            "in-scope job, it should choose available tooling that can create/load bounded evidence for the "
+            "missing units before authoring another successful output."
+        ),
+        "acceptable_resolutions": [
+            "Inspect available tools/resources, then use the same repeated-unit signal that justified expected_job_count to collect/load evidence and author a matching successful output.",
+            "Revise expected_output only if new evidence supports a documented filter or changed scope.",
+            "Write needs_review with evidence-backed rationale if the expected jobs cannot be extracted safely.",
+        ],
+    }
+
+
+def _expected_output_field_availability_error(
+    *,
+    target_path: str,
+    active: dict[str, Any],
+    context: dict[str, Any],
+    expected_output: dict[str, Any],
+    payload: dict[str, Any],
+) -> dict[str, Any] | None:
+    available_fields = expected_output.get("available_fields")
+    field_basis = expected_output.get("field_basis")
+    audit_id = str(active.get("audit_id") or context.get("audit_id") or "")
+    if not isinstance(available_fields, dict) or not available_fields:
+        return _expected_output_field_contract_error(
+            target_path=target_path,
+            audit_id=audit_id,
+            missing="expected_output.available_fields",
+            message=(
+                "Before writing successful candidates/final output, expected_output must declare which metadata "
+                "fields the agent observed as available on the page."
+            ),
+        )
+    if not isinstance(field_basis, dict):
+        return _expected_output_field_contract_error(
+            target_path=target_path,
+            audit_id=audit_id,
+            missing="expected_output.field_basis",
+            message=(
+                "Before writing successful candidates/final output, expected_output must include field_basis "
+                "explaining why required observed metadata fields are available."
+            ),
+        )
+    required_fields = _expected_output_required_observed_fields(expected_output)
+    missing_basis = [field for field in required_fields if not str(field_basis.get(field) or "").strip()]
+    if missing_basis:
+        return _expected_output_field_contract_error(
+            target_path=target_path,
+            audit_id=audit_id,
+            missing=f"expected_output.field_basis for {', '.join(missing_basis)}",
+            message=(
+                "Every required_observed metadata field must include a field_basis entry naming the page signal "
+                "that made the agent treat the field as available."
+            ),
+        )
+    if not required_fields:
+        return None
+
+    jobs = _protocol_payload_jobs(payload)
+    if jobs is None:
+        return None
+    missing_values: list[dict[str, Any]] = []
+    for index, job in enumerate(jobs):
+        if not isinstance(job, dict):
+            continue
+        for field in required_fields:
+            if _is_placeholder_field_value(job.get(field)):
+                missing_values.append({"index": index, "field": field, "value": job.get(field)})
+                if len(missing_values) >= 5:
+                    break
+        if len(missing_values) >= 5:
+            break
+    if not missing_values:
+        return None
+    return {
+        "status": "error",
+        "error_type": "expected_output_policy",
+        "guardrail": "expected_output_field_coverage_mismatch",
+        "audit_id": audit_id,
+        "path": target_path,
+        "missing_or_placeholder_fields": missing_values,
+        "error": (
+            f"The agent declared required observed metadata fields in expected_output.available_fields, "
+            f"but {target_path} contains missing or placeholder values for those fields."
+        ),
+        "unsatisfied_requirements": [
+            {
+                "id": "successful_output_matches_observed_field_availability",
+                "path": target_path,
+                "required_observed_fields": required_fields,
+                "missing_or_placeholder_fields": missing_values,
+                "invariant": (
+                    "If the agent records a metadata field as observed/required from page evidence, successful "
+                    "outputs must extract a real value for that field or change status to needs_review."
+                ),
+                "agent_responsibility": (
+                    "Use the field_basis and current observations to load the relevant card/detail evidence, "
+                    "repair the extraction method or supporting script, then regenerate candidates/final from "
+                    "real evidence. Do not fill observed fields with 'unknown'."
+                ),
+                "acceptable_resolutions": [
+                    "Extract real values for the required_observed fields from bounded page evidence.",
+                    "Revise expected_output.available_fields only if new evidence proves the field is not available.",
+                    "Write needs_review with evidence-backed blockers when the field cannot be safely extracted.",
+                ],
+            }
+        ],
+        "required_next": (
+            "Repair field coverage before retrying a successful protocol output: inspect the evidence basis for "
+            "the required_observed fields, patch or rerun the extraction helper, or return needs_review with "
+            "a blocker. Do not repeat the same placeholder values."
+        ),
+        "count": 0,
+        "written_count": 0,
+    }
+
+
+def _expected_output_field_contract_error(
+    *,
+    target_path: str,
+    audit_id: str,
+    missing: str,
+    message: str,
+) -> dict[str, Any]:
+    return {
+        "status": "error",
+        "error_type": "expected_output_policy",
+        "guardrail": "expected_output_field_availability_required",
+        "audit_id": audit_id,
+        "path": target_path,
+        "missing": missing,
+        "error": message,
+        "unsatisfied_requirements": [
+            {
+                "id": "expected_output_field_availability_recorded",
+                "path": target_path,
+                "missing": missing,
+                "invariant": (
+                    "The agent must declare which metadata fields were observed as available before writing "
+                    "successful outputs, so validation can reject placeholders for observed fields."
+                ),
+                "agent_responsibility": (
+                    "Inspect page observations and repeated card/detail evidence. Record available_fields and "
+                    "field_basis in expected_output, then author outputs that match that field contract."
+                ),
+                "acceptable_resolutions": [
+                    "Record available_fields/field_basis and extract matching field values.",
+                    "Record why fields are not observed and return needs_review if required metadata cannot be verified.",
+                ],
+            }
+        ],
+        "required_next": (
+            "Update expected_output with available_fields and field_basis derived from page evidence before "
+            "retrying a successful candidates/final write."
+        ),
+        "count": 0,
+        "written_count": 0,
+    }
+
+
+def _expected_output_required_observed_fields(expected_output: dict[str, Any]) -> list[str]:
+    fields: set[str] = set()
+    direct_fields = expected_output.get("required_observed_fields")
+    if isinstance(direct_fields, list):
+        fields.update(str(item).strip() for item in direct_fields if str(item).strip())
+    available_fields = expected_output.get("available_fields")
+    if isinstance(available_fields, dict):
+        for field, status in available_fields.items():
+            field_name = str(field).strip()
+            if field_name and _is_required_observed_status(status):
+                fields.add(field_name)
+    return sorted(fields)
+
+
+def _is_required_observed_status(status: Any) -> bool:
+    if isinstance(status, bool):
+        return status
+    if isinstance(status, str):
+        normalized = status.strip().lower().replace("-", "_").replace(" ", "_")
+        return normalized in REQUIRED_OBSERVED_FIELD_STATUSES
+    if isinstance(status, dict):
+        if bool(status.get("required")) or bool(status.get("required_when_observed")):
+            return True
+        for key in ("status", "availability", "requirement"):
+            value = status.get(key)
+            if isinstance(value, str) and _is_required_observed_status(value):
+                return True
+    return False
+
+
+def _is_placeholder_field_value(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return value.strip().lower() in PLACEHOLDER_FIELD_VALUES
+    if isinstance(value, list):
+        return not any(not _is_placeholder_field_value(item) for item in value)
+    return False
+
+
+def _expected_output_job_count(expected_output: dict[str, Any]) -> int | None:
+    for key in ("expected_job_count", "job_count", "total_jobs", "observed_job_count"):
+        value = expected_output.get(key)
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, int) and value >= 0:
+            return value
+        if isinstance(value, str) and value.strip().isdigit():
+            return int(value.strip())
+    return None
+
+
+def _protocol_payload_jobs(payload: dict[str, Any]) -> list[Any] | None:
+    if isinstance(payload.get("jobs"), list):
+        return payload["jobs"]
+    result = payload.get("result")
+    if isinstance(result, dict) and isinstance(result.get("jobs"), list):
+        return result["jobs"]
+    return None
+
+
+def _sandbox_write_json_payload(tool_args: dict[str, Any]) -> dict[str, Any] | None:
+    args = [str(item) for item in (tool_args.get("args") or []) if item is not None]
+    content = _option_value(args, "--content")
+    if not content:
+        return None
+    try:
+        parsed = json.loads(content)
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _protocol_payload_job_count(payload: dict[str, Any]) -> int | None:
+    jobs = payload.get("jobs")
+    if isinstance(jobs, list):
+        return len(jobs)
+    result = payload.get("result")
+    if isinstance(result, dict):
+        result_jobs = result.get("jobs")
+        if isinstance(result_jobs, list):
+            return len(result_jobs)
+    return None
+
+
+def _payload_declares_non_success_review(payload: dict[str, Any]) -> bool:
+    status_values: list[Any] = [payload.get("status")]
+    result = payload.get("result")
+    if isinstance(result, dict):
+        status_values.append(result.get("status"))
+    crawl = payload.get("crawl")
+    if isinstance(crawl, dict):
+        status_values.append(crawl.get("status"))
+        if crawl.get("needs_review") is True:
+            return True
+    if isinstance(result, dict):
+        result_crawl = result.get("crawl")
+        if isinstance(result_crawl, dict):
+            status_values.append(result_crawl.get("status"))
+            if result_crawl.get("needs_review") is True:
+                return True
+    return any(str(value or "").strip().lower() in {"needs_review", "blocked", "error"} for value in status_values)
+
+
+def _producer_write_after_success_policy_error(tool_args: dict[str, Any], tool_context: Any) -> dict[str, Any] | None:
+    if tool_args.get("skill_name") != "sandbox-page-analyst":
+        return None
+    file_path = _normalize_skill_path(str(tool_args.get("file_path") or ""))
+    if file_path not in {"scripts/sandbox_write_file.py", "scripts/sandbox_apply_patch.py"}:
+        return None
+    if not _sandbox_write_touches_producer(tool_args):
+        return None
+
+    state = getattr(tool_context, "state", None)
+    if not _is_state_like(state):
+        return None
+    active = state.get(ACTIVE_SANDBOX_STATE_KEY)
+    if not isinstance(active, dict) or str(active.get("mode") or "workflow") != "workflow":
+        return None
+    if not active.get("extractor_executed"):
+        return None
+
+    repair = active.get("last_repair_target")
+    if isinstance(repair, dict) and _repair_target_allows_producer_write(repair):
+        return None
+
     audit_id = str(active.get("audit_id") or "")
     return {
         "status": "error",
-        "error_type": "workflow_protocol_write_policy",
-        "guardrail": "extractor_must_persist_protocol_outputs",
+        "error_type": "producer_write_after_success_policy",
+        "guardrail": "validate_or_finalize_after_successful_producer_run",
         "audit_id": audit_id,
-        "path": target_path,
+        "path": WORKFLOW_PRODUCER_PATH,
         "count": 0,
         "written_count": 0,
         "error": (
-            f"Refused direct write to {target_path}. In workflow mode, required protocol outputs must be "
-            "created by output/extractor.py and refreshed by rerunning `python output/extractor.py`, not "
-            "patched manually through sandbox_write_file.py."
+            "output/extractor.py already ran successfully in the active workflow sandbox. Do not rewrite or patch "
+            "the producer again based on self-judgment or stale notes."
+        ),
+        "required_next": (
+            "Run scripts/validate_outputs.py or scripts/sandbox_finalize.py for this audit. Only modify "
+            "output/extractor.py again if the fresh validator/finalizer result reports a concrete repair error."
         ),
     }
+
+
+def _sandbox_write_touches_producer(tool_args: dict[str, Any]) -> bool:
+    file_path = _normalize_skill_path(str(tool_args.get("file_path") or ""))
+    if file_path == "scripts/sandbox_write_file.py":
+        return _sandbox_write_target_path(tool_args) == WORKFLOW_PRODUCER_PATH
+    if file_path != "scripts/sandbox_apply_patch.py":
+        return False
+    args = [str(item) for item in (tool_args.get("args") or []) if item is not None]
+    exact_path = _normalize_skill_path(_option_value(args, "--path"))
+    if exact_path == WORKFLOW_PRODUCER_PATH:
+        return True
+    patch = str(_option_value(args, "--patch") or "")
+    return "output/extractor.py" in patch or "extractor.py" in patch
+
+
+def _repair_target_allows_producer_write(repair: dict[str, Any]) -> bool:
+    if repair.get("producer_rerun_status") == "success_unvalidated":
+        return False
+    required_action = str(repair.get("required_action") or "")
+    if required_action in {"debug_repair_extractor", "debug_repair_protocol_outputs", "agent_plan_repair"}:
+        return True
+    source = _normalize_skill_path(str(repair.get("file_path") or ""))
+    if source not in {"scripts/sandbox_finalize.py", "scripts/validate_outputs.py"}:
+        return False
+    error = str(repair.get("error") or repair.get("stderr") or repair.get("error_type") or "")
+    return bool(error.strip())
 
 
 def _sandbox_write_target_path(tool_args: dict[str, Any]) -> str:
@@ -2431,6 +3220,23 @@ def _extraction_context_update_policy_error(tool_args: dict[str, Any], tool_cont
     if repeat_count < 2 and consecutive_count <= 1:
         return None
 
+    planned_next_tool = _active_planned_next_tool(tool_context)
+    if planned_next_tool:
+        required_next = (
+            "You already updated SESSION_EXTRACTION_CONTEXT with a concrete planned_next_tool. "
+            "Look at the plan you wrote previously and act accordingly: call required_next_tool now. "
+            "Do not call update_extraction_context again until that planned tool returns, unless new "
+            "non-context evidence proves the plan cannot be followed."
+        )
+    else:
+        required_next = (
+            "You already updated SESSION_EXTRACTION_CONTEXT once. Look at the plan you wrote previously and "
+            "take the next state-changing sandbox action from that plan instead of another context-only update: "
+            "write or repair a supporting script, write or revise accountable protocol outputs, validate outputs, "
+            "finalize, promote finalized outputs, or return a compact blocker only if no safe repair exists. The "
+            "sandbox remains active; do not treat this as a terminal sandbox failure."
+        )
+
     return {
         "status": "error",
         "error_type": "extraction_context_update_policy",
@@ -2441,15 +3247,11 @@ def _extraction_context_update_policy_error(tool_args: dict[str, Any], tool_cont
         "consecutive_count": consecutive_count,
         "error": (
             "update_extraction_context was called while the workflow sandbox was still running and no "
-            "state-changing workflow action happened after the previous context update. Session context is a "
-            "notebook, not a progress action."
+            "state-changing workflow action happened after the previous context update. You already updated "
+            "SESSION_EXTRACTION_CONTEXT once; the next step is to follow the plan you wrote there."
         ),
-        "required_next": (
-            "Take a state-changing sandbox action instead of another context-only update: write or repair "
-            "output/extractor.py, run it, validate outputs, finalize, promote finalized outputs, or return a "
-            "compact blocker only if no safe repair exists. The sandbox remains active; do not treat this as a "
-            "terminal sandbox failure."
-        ),
+        "required_next_tool": planned_next_tool or {},
+        "required_next": required_next,
     }
 
 
@@ -2475,6 +3277,7 @@ def _extraction_context_update_digest(tool_args: dict[str, Any]) -> str:
             "immediate_goal",
             "required_outputs",
             "workflow_contract",
+            "expected_output",
         )
     }
     return _sha256_json(material)
@@ -2521,9 +3324,9 @@ def _repeated_sandbox_read_policy_error(tool_args: dict[str, Any], tool_context:
             "file are unlikely to repair the workflow."
         ),
         "required_next": (
-            "Take a state-changing repair action now: patch output/extractor.py with scripts/sandbox_apply_patch.py "
-            "or rewrite it with scripts/sandbox_write_file.py if patching is not viable, then rerun "
-            "`python output/extractor.py`."
+            "Take a state-changing repair action now: patch the relevant helper with scripts/sandbox_apply_patch.py, "
+            "rewrite it with scripts/sandbox_write_file.py if patching is not viable, or revise the accountable "
+            "protocol output from inspected evidence/script output; then rerun the focused validation/finalization step."
         ),
         "count": 0,
         "written_count": 0,
@@ -2665,8 +3468,8 @@ def _active_sandbox_record_query_error(tool_context: Any, tool_name: str) -> dic
             "Finish the sandbox protocol first."
         ),
         "required_next": (
-            "Continue the active sandbox workflow: run or repair extractor code, validate protocol outputs, "
-            "call sandbox_finalize.py successfully, then persist/query/record results."
+            "Continue the active sandbox workflow: complete evidence loading and helper/protocol repairs, validate "
+            "protocol outputs, call sandbox_finalize.py successfully, then persist/query/record results."
         ),
     }
 
@@ -2834,7 +3637,7 @@ def _pending_script_policy_error(active: dict[str, Any], pending: dict[str, Any]
         "written_count": 0,
         "error": reason,
         "required_next": (
-            f"Run the written script in the sandbox with sandbox_exec.py using `python {script_path}`. "
+            f"Run the written helper/script in the sandbox with sandbox_exec.py using `python {script_path}`. "
             "Then verify it produced required protocol artifacts before validate/finalize/persist/query/record."
         ),
     }
@@ -2867,7 +3670,7 @@ def _add_required_next_for_pending_script(result: dict[str, Any], state: Any) ->
     return _add_required_next(
         result,
         (
-            f"Run the written or patched script before inspecting final outputs: use sandbox_exec.py with "
+            f"Run the written or patched helper/script before inspecting final outputs: use sandbox_exec.py with "
             f"`python {pending.get('path') or 'output/extractor.py'}`. Then verify it produced protocol artifacts."
         ),
     )
@@ -2914,6 +3717,30 @@ def _sandbox_debugger_required_next(
             "with `scripts/sandbox_exec.py` and validate/finalize. Modify only Docker sandbox workspace artifacts. "
             f"Last error: {_preview(error, 500)}"
         )
+    elif payload.get("error_type") == "expected_output_policy":
+        repair_guidance = (
+            "Use the returned unsatisfied_requirements as invariant facts, not as a scripted tool plan. The "
+            "agent must reason about which prerequisite is missing, record that decision in session context with "
+            "a concrete planned_next_tool, and take a state-changing action that can satisfy the invariant. "
+            "Before choosing that action, inspect how expected_output was derived: the observations, "
+            "count_basis, attempted_actions, and latest tool results that established the expected unit count. "
+            "Also inspect the available tools/resources and choose how those tools can satisfy the unmet "
+            "expectation. Use that same evidence basis to plan extraction for every expected unit. Do not repeat "
+            "the rejected successful output unchanged. If exact evidence for the expected units has not been "
+            "loaded, make evidence coverage the next objective before authoring another successful candidates/final payload. "
+            f"Last error: {_preview(error, 500)}"
+        )
+    elif "evidence/index.json is required" in error.lower():
+        repair_guidance = (
+            "Load `sandbox-extraction-debugger` before the next repair attempt. Do not rerun finalization and do "
+            "not keep rewriting candidates/final with unsaved evidence refs. The concrete repair is to create exact "
+            "evidence chunks under `evidence/chunks/`, write `evidence/index.json`, mark only chunks already loaded "
+            "by the agent as `loaded: true`, and reconcile `output/candidates.json` plus `output/final.json` so every "
+            "field_rationale/evidence_refs entry points to a saved loaded chunk. Update session context with "
+            "planned_next_tool for `scripts/sandbox_write_file.py` or `scripts/sandbox_read.py`, and repair_scope "
+            "must include `evidence/index.json`, `evidence/chunks/`, `output/candidates.json`, and `output/final.json`. "
+            f"Last error: {_preview(error, 500)}"
+        )
     else:
         repair_guidance = (
             "Load `sandbox-extraction-debugger` before the next repair attempt. Use the sandbox tools exposed through "
@@ -2922,8 +3749,8 @@ def _sandbox_debugger_required_next(
             "only Docker sandbox workspace artifacts. Use `scripts/sandbox_write_file.py` only for initial creation "
             "or unresolvable patch conflicts. "
             "If the error says required protocol outputs are missing, do not read the missing files as the next step; "
-            "inspect and patch `output/extractor.py` so the next extractor run writes those files, then rerun "
-            "`python output/extractor.py` and validate/finalize again. Otherwise inspect the current sandbox workspace "
+            "inspect loaded evidence, current protocol outputs, and any serialization helper, then create or repair "
+            "the missing accountable protocol files from loaded evidence and validate/finalize again. Otherwise inspect the current sandbox workspace "
             f"to identify which output artifact or sandbox-written script caused the error in {file_path} for audit {audit_id}. Treat mounted helper "
             f"scripts and schemas as read-only specs. Last error: {_preview(error, 500)}"
         )
@@ -2944,8 +3771,8 @@ def _record_active_repair_target(
     active["status"] = "running"
     active["last_repair_target"] = {
         "file_path": file_path,
-        "producer_hint": "output/extractor.py",
-        "required_action": "debug_repair_extractor",
+        "artifact_hint": "accountable protocol outputs",
+        "required_action": "agent_plan_repair",
         "error": str(payload.get("error") or payload.get("stderr") or payload.get("error_type") or "sandbox workflow error"),
     }
     if target_path:
@@ -2958,7 +3785,7 @@ def _successful_exec_clears_repair_target(active: dict[str, Any]) -> bool:
     if not isinstance(repair, dict):
         return True
     source = _normalize_skill_path(str(repair.get("file_path") or ""))
-    # A producer rerun is not proof that a validator/finalizer error is fixed.
+    # A helper rerun is not proof that a validator/finalizer error is fixed.
     # Keep those repair targets alive until validate/finalize succeeds.
     if source in {"scripts/sandbox_finalize.py", "scripts/validate_outputs.py"}:
         return False
@@ -2977,28 +3804,38 @@ def _repair_target_requires_rewrite(repair: dict[str, Any]) -> bool:
 
 
 def _repair_target_next_action(repair: dict[str, Any]) -> str:
-    producer = str(repair.get("producer_hint") or "output/extractor.py")
+    artifact = str(repair.get("artifact_hint") or repair.get("producer_hint") or "accountable protocol outputs")
     error = _preview(str(repair.get("error") or ""), 350)
+    if "evidence/index.json is required" in error.lower():
+        return (
+            "The latest sandbox result is actionable missing-evidence repair feedback. Do not answer the user and "
+            "do not rerun finalization yet. Create exact evidence chunks plus `evidence/index.json`, mark only loaded "
+            "chunks as loaded, then reconcile candidates/final evidence refs before validate/finalize. Last error: "
+            f"{error}"
+        )
     if repair.get("producer_rerun_status") == "success_unvalidated":
         return (
-            "The repaired producer has already been rerun successfully. Do not patch it again from the stale "
-            f"error alone. Validate the regenerated protocol outputs with scripts/validate_outputs.py or "
-            f"sandbox_finalize.py; only repair {producer} again if the fresh validator/finalizer result still "
+            "The repaired helper/script has already been rerun successfully. Do not patch it again from the stale "
+            "error alone. Validate the regenerated protocol outputs with scripts/validate_outputs.py or "
+            f"sandbox_finalize.py; only repair {artifact} again if the fresh validator/finalizer result still "
             f"reports a concrete error. Previous error: {error}"
         )
     if _repair_target_requires_rewrite(repair):
         return (
             "The latest sandbox result is actionable repair feedback. Do not answer the user yet. "
-            f"Treat this as rejected initial producer creation: create or rewrite {producer} with "
+            f"Treat this as rejected initial helper/artifact creation: create or rewrite {artifact} with "
             "scripts/sandbox_write_file.py using corrected full source. Do not patch a missing file and do not "
-            "modify host workflow code. Rerun the extractor, then "
+            "modify host workflow code. Rerun the focused helper or validation command, then "
             f"validate/finalize. Last error: {error}"
         )
     return (
         "The latest sandbox result is actionable repair feedback. Do not answer the user yet. "
-        f"Load sandbox-extraction-debugger, inspect the producer artifact for {repair.get('file_path')}, "
-        f"follow the official patch-first repair workflow for {producer}, "
-        f"rerun the extractor, then validate/finalize. Last error: {error}"
+        "Treat guardrail payloads as unsatisfied requirements, not instructions for a fixed next tool. "
+        "Choose the missing prerequisite from the facts in session context, then record and execute a coherent "
+        "planned_next_tool that can satisfy it. "
+        "Load sandbox-extraction-debugger, classify the failure as evidence/agent reasoning, helper serialization, "
+        f"or helper discovery for {repair.get('file_path')}, then repair {artifact} from loaded evidence. "
+        f"Rerun the focused helper or validation command, then validate/finalize. Last error: {error}"
     )
 
 
@@ -3011,7 +3848,11 @@ def _active_repair_target_model_replacement(state: Any, llm_response: LlmRespons
     repair = active.get("last_repair_target")
     if not isinstance(repair, dict):
         return None
-    if str(repair.get("required_action") or "") != "debug_repair_extractor":
+    if str(repair.get("required_action") or "") not in {
+        "debug_repair_extractor",
+        "debug_repair_protocol_outputs",
+        "agent_plan_repair",
+    }:
         return None
     if _recent_context_update_policy_block(state):
         return None
@@ -3023,44 +3864,30 @@ def _active_repair_target_model_replacement(state: Any, llm_response: LlmRespons
 
     audit_id = str(active.get("audit_id") or repair.get("audit_id") or "")
     error = str(repair.get("error") or "recoverable sandbox workflow error")
-    producer = str(repair.get("producer_hint") or "output/extractor.py")
     source = str(repair.get("file_path") or "sandbox workflow")
     if _repair_target_requires_rewrite(repair):
         extraction_plan = (
-            f"Create or rewrite {producer} with corrected full source. The previous write was rejected before "
-            "the producer file was accepted, so patching a missing file is not viable and host workflow code "
-            "must not be modified."
+            "Decide the next repair action from the latest validator/finalizer error and record it in "
+            "planned_next_tool before taking another state-changing action."
         )
         immediate_goal = (
-            f"Use scripts/sandbox_write_file.py to create or rewrite {producer} so one run writes every required "
-            "protocol output, then run `python output/extractor.py` with sandbox_exec.py."
+            "Update session context with the agent-chosen repair plan and exact planned_next_tool. The runtime "
+            "has recorded the active failure but is not choosing the repair tool for the agent."
         )
-        planned_next_tool = {
-            "tool_name": "functions.run_skill_script",
-            "skill_name": "sandbox-page-analyst",
-            "file_path": "scripts/sandbox_write_file.py",
-            "intent": "rewrite rejected producer source inside the Docker sandbox",
-        }
     else:
         extraction_plan = (
-            f"Load sandbox-extraction-debugger and follow its official patch-first repair workflow for {producer}; "
-            "one producer run must generate all required protocol outputs before validation and finalization."
+            "Classify the active failure as evidence/agent-reasoning, helper serialization, or helper discovery "
+            "before choosing the next repair action."
         )
         immediate_goal = (
-            f"Use sandbox-extraction-debugger to repair {producer}; prefer a patch-first producer edit when "
-            "available and do not write protocol JSON files directly. Then run `python output/extractor.py` "
-            "with sandbox_exec.py."
+            "Update session context with the agent-chosen repair plan and exact planned_next_tool. The runtime "
+            "has recorded the active failure but is not choosing the repair tool for the agent."
         )
-        planned_next_tool = {
-            "tool_name": "load_skill",
-            "skill_name": "sandbox-extraction-debugger",
-            "intent": "load official sandbox repair protocol before patching producer",
-        }
     return LlmResponse(
         content=genai_types.Content(
             role="model",
             parts=[
-                genai_types.Part.from_function_call(
+                _synthetic_function_call_part(
                     name="update_extraction_context",
                     args={
                         "audit_id": audit_id,
@@ -3069,13 +3896,12 @@ def _active_repair_target_model_replacement(state: Any, llm_response: LlmRespons
                             f"Recoverable sandbox workflow error from {source}: {_preview(error, 500)}",
                         ],
                         "attempted_actions": [
-                            "Model attempted to answer while a recoverable extractor repair target was active; runtime blocked the final text.",
+                            "Model attempted to answer while a recoverable protocol repair target was active; runtime blocked the final text.",
                         ],
                         "extraction_plan": [
                             extraction_plan,
                         ],
                         "immediate_goal": immediate_goal,
-                        "planned_next_tool": planned_next_tool,
                     },
                 )
             ],
@@ -3103,32 +3929,21 @@ def _active_sandbox_model_replacement(state: Any, llm_response: LlmResponse) -> 
     pending = _pending_scripts_for_active_sandbox(state, active)
     if pending:
         immediate_goal = (
-            f"Run the pending producer script {pending.get('path') or 'output/extractor.py'} in the sandbox, "
-            "then validate/finalize before answering."
+            f"A pending sandbox helper/script exists at {pending.get('path') or 'output/extractor.py'}. "
+            "Update session context with the agent-chosen next tool before answering."
         )
-        planned_next_tool = {
-            "tool_name": "run_skill_script",
-            "skill_name": "sandbox-page-analyst",
-            "file_path": "scripts/sandbox_exec.py",
-            "intent": "run pending producer before validation/finalization",
-        }
     else:
         immediate_goal = (
-            "The workflow sandbox is still running and has not finalized. Run sandbox_finalize.py to prove "
-            "the protocol outputs are valid, or use the returned finalizer error as the next repair target."
+            "The workflow sandbox is still running and has not finalized. Update session context with the "
+            "agent-chosen next tool: usually validation/finalization when outputs exist, or an evidence/helper "
+            "repair when the latest state proves one is needed."
         )
-        planned_next_tool = {
-            "tool_name": "run_skill_script",
-            "skill_name": "sandbox-page-analyst",
-            "file_path": "scripts/sandbox_finalize.py",
-            "intent": "prove protocol outputs are finalized before final response",
-        }
 
     return LlmResponse(
         content=genai_types.Content(
             role="model",
             parts=[
-                genai_types.Part.from_function_call(
+                _synthetic_function_call_part(
                     name="update_extraction_context",
                     args={
                         "audit_id": audit_id,
@@ -3140,7 +3955,6 @@ def _active_sandbox_model_replacement(state: Any, llm_response: LlmResponse) -> 
                             "Runtime blocked a premature final text response because no successful sandbox finalization was recorded.",
                         ],
                         "immediate_goal": immediate_goal,
-                        "planned_next_tool": planned_next_tool,
                     },
                 )
             ],
@@ -3164,6 +3978,21 @@ def _recent_context_update_policy_block(state: Any) -> bool:
     return False
 
 
+def _synthetic_function_call_part(name: str, args: dict[str, Any]) -> genai_types.Part:
+    """Create a runtime tool call id that ADK will not strip before LiteLLM."""
+
+    # ADK strips its own `adk-...` ids before building LiteLLM messages. These
+    # runtime-generated calls must retain ids so the following tool response can
+    # become a valid OpenAI `tool_call_id`.
+    return genai_types.Part(
+        function_call=genai_types.FunctionCall(
+            id=f"call_runtime_{uuid.uuid4().hex}",
+            name=name,
+            args=args,
+        )
+    )
+
+
 def _llm_response_has_function_call(llm_response: LlmResponse) -> bool:
     content = getattr(llm_response, "content", None)
     if not content:
@@ -3184,6 +4013,96 @@ def _llm_response_text(llm_response: LlmResponse) -> str:
         if text:
             chunks.append(str(text))
     return "\n".join(chunks)
+
+
+def _model_reasoning_telemetry(
+    llm_response: LlmResponse,
+    *,
+    reasoning_effort: str,
+    preview_max_chars: int,
+) -> dict[str, Any] | None:
+    thought_parts = _llm_response_thought_texts(llm_response)
+    usage = getattr(llm_response, "usage_metadata", None)
+    thoughts_token_count = getattr(usage, "thoughts_token_count", None) if usage is not None else None
+    if not thought_parts and not thoughts_token_count and not reasoning_effort:
+        return None
+
+    telemetry: dict[str, Any] = {
+        "model_version": str(getattr(llm_response, "model_version", "") or ""),
+        "reasoning_effort": reasoning_effort,
+        "thought_part_count": len(thought_parts),
+    }
+    if thought_parts and preview_max_chars:
+        telemetry["reasoning_summary_preview"] = "\n".join(thought_parts)[:preview_max_chars]
+    if thoughts_token_count:
+        telemetry["thoughts_token_count"] = thoughts_token_count
+    return telemetry
+
+
+def _attach_reasoning_telemetry_to_model_event(
+    llm_response: LlmResponse,
+    telemetry: dict[str, Any],
+) -> None:
+    metadata = dict(llm_response.custom_metadata or {})
+    event_payload = dict(telemetry)
+    event_payload["adk_web_surface"] = "model_event_custom_metadata"
+    metadata["job_scraper_reasoning"] = event_payload
+    llm_response.custom_metadata = metadata
+
+
+def _surface_reasoning_telemetry_as_adk_web_thought(
+    llm_response: LlmResponse,
+    telemetry: dict[str, Any],
+) -> bool:
+    if _llm_response_thought_texts(llm_response):
+        return False
+
+    display_text = _reasoning_telemetry_display_text(telemetry)
+    if not display_text:
+        return False
+    if not str(telemetry.get("reasoning_summary_preview") or "").strip():
+        return False
+
+    if llm_response.content is None:
+        llm_response.content = genai_types.Content(role="model", parts=[])
+    if llm_response.content.parts is None:
+        llm_response.content.parts = []
+
+    llm_response.content.parts.insert(0, genai_types.Part(text=display_text, thought=True))
+    metadata = dict(llm_response.custom_metadata or {})
+    event_payload = dict(metadata.get("job_scraper_reasoning") or telemetry)
+    event_payload["adk_web_thought_part"] = "synthetic_reasoning_telemetry"
+    metadata["job_scraper_reasoning"] = event_payload
+    llm_response.custom_metadata = metadata
+    return True
+
+
+def _reasoning_telemetry_display_text(telemetry: dict[str, Any]) -> str:
+    preview = str(telemetry.get("reasoning_summary_preview") or "").strip()
+    if preview:
+        return preview
+
+    fields: list[str] = []
+    effort = str(telemetry.get("reasoning_effort") or "").strip()
+    if effort:
+        fields.append(f"effort={effort}")
+    token_count = telemetry.get("thoughts_token_count")
+    if token_count:
+        fields.append(f"thoughts_token_count={token_count}")
+    if not fields:
+        return ""
+    return "OpenAI reasoning telemetry: " + "; ".join(fields) + "."
+
+
+def _llm_response_thought_texts(llm_response: LlmResponse) -> list[str]:
+    content = getattr(llm_response, "content", None)
+    if not content:
+        return []
+    texts: list[str] = []
+    for part in content.parts or []:
+        if getattr(part, "thought", False) and getattr(part, "text", None):
+            texts.append(str(part.text))
+    return texts
 
 
 def _record_last_page_workspace(tool_context: Any, result: dict[str, Any]) -> None:
@@ -3483,8 +4402,9 @@ def _workflow_start_guard_text_from_context(callback_context: Any) -> str:
         "message: workflow-mode is loaded and a page artifact is available, but no workflow sandbox is active. "
         "Start the workflow sandbox before persistence, query, or final answer. "
         f"{_workflow_start_required_next(state)} "
-        "After the sandbox starts, inspect mounted files, derive recurring job-post patterns, write and run extractor "
-        "code, validate protocol outputs, finalize, then persist and query saved jobs. Do not load diagnostic-mode.\n"
+        "After the sandbox starts, inspect mounted files, derive recurring job-post patterns, load bounded exact "
+        "evidence, write only supporting scripts as needed, create accountable protocol outputs, "
+        "validate, finalize, then persist and query saved jobs. Do not load diagnostic-mode.\n"
         "</RUNTIME_SANDBOX_START_GUARD>"
     )
 
@@ -3563,12 +4483,14 @@ def _inject_latest_tool_result(llm_request: LlmRequest) -> None:
 def _latest_tool_result_from_contents(contents: list[genai_types.Content]) -> dict[str, Any] | None:
     for content in reversed(contents):
         responses: list[dict[str, Any]] = []
-        for part in content.parts or []:
+        for part in reversed(content.parts or []):
             function_response = getattr(part, "function_response", None)
             if not function_response:
                 continue
             tool_name = str(function_response.name or "")
             payload = function_response.response or {}
+            if _is_successful_context_update(tool_name, payload):
+                return None
             if _skip_latest_tool_result(tool_name, payload):
                 continue
             responses.append(_compact_latest_function_response(tool_name, payload))
@@ -3581,9 +4503,117 @@ def _latest_tool_result_from_contents(contents: list[genai_types.Content]) -> di
 
 
 def _skip_latest_tool_result(tool_name: str, payload: Any) -> bool:
+    return _is_successful_context_update(tool_name, payload)
+
+
+def _is_successful_context_update(tool_name: str, payload: Any) -> bool:
     if tool_name != "update_extraction_context" or not isinstance(payload, dict):
         return False
     return str(payload.get("status") or "").lower() == "success"
+
+
+def _prune_loaded_resource_contexts(llm_request: LlmRequest, state: Any) -> None:
+    """Remove full skill/reference text once it has had a chance to enter state."""
+
+    responses: list[Any] = []
+    for content in llm_request.contents:
+        for part in content.parts or []:
+            response = getattr(part, "function_response", None)
+            if response:
+                responses.append(response)
+    if not responses:
+        return
+
+    latest_context_update_index = -1
+    resource_indexes: list[int] = []
+    for index, response in enumerate(responses):
+        tool_name = str(response.name or "")
+        payload = response.response or {}
+        if _is_successful_context_update(tool_name, payload):
+            latest_context_update_index = index
+        if tool_name in EPHEMERAL_RESOURCE_TOOL_NAMES and isinstance(payload, dict):
+            resource_indexes.append(index)
+
+    if not resource_indexes:
+        return
+
+    resource_after_update = [index for index in resource_indexes if index > latest_context_update_index]
+    keep_full_index = max(resource_after_update) if resource_after_update else None
+    if latest_context_update_index < 0 and keep_full_index is None:
+        keep_full_index = max(resource_indexes)
+
+    context_updated = _is_state_like(state) and isinstance(state.get(SESSION_EXTRACTION_CONTEXT_STATE_KEY), dict)
+    for index in resource_indexes:
+        if index == keep_full_index:
+            continue
+        response = responses[index]
+        payload = response.response or {}
+        if not isinstance(payload, dict) or _is_compacted_resource_payload(payload):
+            continue
+        response.response = _loaded_resource_placeholder(
+            tool_name=str(response.name or ""),
+            payload=payload,
+            compacted_after_context_update=latest_context_update_index >= index or bool(context_updated),
+        )
+
+
+def _is_compacted_resource_payload(payload: dict[str, Any]) -> bool:
+    return str(payload.get("status") or "") in {
+        "resource_context_removed_after_state_update",
+        "resource_context_compacted_keep_latest_only",
+    }
+
+
+def _loaded_resource_placeholder(
+    *,
+    tool_name: str,
+    payload: dict[str, Any],
+    compacted_after_context_update: bool,
+) -> dict[str, Any]:
+    status = (
+        "resource_context_removed_after_state_update"
+        if compacted_after_context_update
+        else "resource_context_compacted_keep_latest_only"
+    )
+    placeholder: dict[str, Any] = {
+        "status": status,
+        "tool_name": tool_name,
+        "reason": (
+            "Full skill/reference text was intentionally removed from this model request after the agent had a "
+            "chance to distill it into SESSION_EXTRACTION_CONTEXT."
+            if compacted_after_context_update
+            else "Older loaded skill/reference text was removed so only the newest full resource remains in context."
+        ),
+        "required_next": (
+            "Reason from SESSION_EXTRACTION_CONTEXT and the current plan. If the discarded resource is needed for "
+            "a specific uncertainty, reload that skill/resource, update_extraction_context with the distilled "
+            "observations and plan changes, then continue."
+        ),
+        "resource_discarded_from_context": True,
+    }
+    for key in (
+        "skill_name",
+        "resource_path",
+        "path",
+        "file_path",
+        "name",
+        "title",
+        "description",
+        "mime_type",
+        "error",
+        "error_type",
+    ):
+        if key in payload:
+            placeholder[key] = _compact_latest_value(payload[key], 500)
+    if "status" in payload:
+        placeholder["original_status"] = _compact_latest_value(payload["status"], 120)
+    content_value = payload.get("content") or payload.get("text") or payload.get("instructions")
+    if content_value is not None:
+        content_text = str(content_value)
+        placeholder["original_chars"] = len(content_text)
+        placeholder["content_preview"] = _preview(content_text, 500)
+        placeholder["sha256"] = hashlib.sha256(content_text.encode("utf-8")).hexdigest()
+    return placeholder
 
 
 def _compact_latest_function_response(tool_name: str, payload: Any) -> dict[str, Any]:
@@ -3682,29 +4712,50 @@ def _inject_session_extraction_context(llm_request: LlmRequest, state: Any) -> N
                         "SESSION_EXTRACTION_CONTEXT until another non-context tool returns. Do not treat the update "
                         "confirmation itself as new evidence, and do not call update_extraction_context merely "
                         "because update_extraction_context succeeded.\n"
-                        "5. Use observations as page/workspace facts and extraction_plan as the current method for "
-                        "turning those facts into required outputs. Update them when new evidence changes the method.\n"
+                        "5. Use observations as page/workspace facts. Treat extraction_strategy as the current "
+                        "method for turning observed repeated job units into required outputs; follow it by "
+                        "default, enhance it when new evidence adds field/pattern detail, and revise it when "
+                        "new evidence or validation/finalization contradicts it. extraction_plan is the "
+                        "near-term work plan for gathering evidence and executing that strategy.\n"
                         "6. Use known_errors as active blockers only. If latest results show an error is solved, call "
                         "update_extraction_context with known_errors rewritten without that stale error.\n"
                         "7. Check attempted_actions before acting. Do not repeat actions that did not change state; "
                         "choose a state-changing repair, validation, finalization, promotion, or query action instead.\n"
-                        "8. If extractor outputs exist and no concrete validation/finalization error is active, the "
-                        "next objective is validation/finalization, not another extractor rewrite.\n"
+                        "8. If required protocol outputs exist and no concrete validation/finalization error is active, "
+                        "the next objective is validation/finalization, not another helper rewrite.\n"
                         "9. If planned_next_tool is present, the next tool call must match it. If the plan is stale, "
                         "first update this context with the new evidence, a revised immediate_goal, and replacement "
                         "planned_next_tool.\n"
-                        "10. Treat required_outputs and workflow_contract as hard workflow invariants. Before starting "
-                        "a workflow sandbox, writing output/extractor.py, running it, validating, finalizing, or "
-                        "persisting, verify the contract says output/extractor.py must create every required protocol "
-                        "output in one extraction pass.\n"
+                        "10. Treat required_outputs, workflow_contract, and expected_output as hard workflow invariants. Before starting "
+                        "a workflow sandbox, writing helper/protocol files, validating, finalizing, or persisting, "
+                        "verify the contract says the agent chooses and owns the extraction method, supporting scripts "
+                        "are recorded when authored, and every nontrivial field cites evidence when evidence is chunked. Before "
+                        "writing output/candidates.json or output/final.json, expected_output.expected_job_count "
+                        "must match the repeated units you observed, with count_basis recorded. "
+                        "expected_output.available_fields and expected_output.field_basis must declare which "
+                        "metadata fields were observed as available; successful outputs cannot use placeholders "
+                        "for fields marked required_observed.\n"
+                        "10a. Before writing an output/*.py producer script or successful protocol result file, "
+                        "load scripts/protocol_contract.py and update this context with output_contract plus your "
+                        "own producer_output_plan. The policy supplies the contract only; the agent must decide the "
+                        "extraction method, evidence plan, script manifest plan, and validation sequence.\n"
                         "11. If repair_scope is present, treat it as the bounded work order for the current repair: "
-                        "load only allowed_resources, inspect only allowed_inspections, patch only files, and when "
+                        "load only allowed_resources, patch only files, and use sandbox_read.py for bounded reads "
+                        "of sandbox files when inspection helps the next repair decision. When "
                         "status is ready_to_verify/verifying run the declared verification command before changing "
                         "scope.\n"
-                        "12. Before every non-context tool call and final response, reconcile <LATEST_TOOL_RESULT> "
+                        "12. Treat workflow_reflections as learned interpretations of prior failure patterns, not "
+                        "fixed tool recipes. Apply them when choosing or revising planned_next_tool, especially when "
+                        "the latest error matches a reflection trigger.\n"
+                        "13. Skill and reference resource text is temporary context, not durable memory. After loading "
+                        "one, distill the relevant workflow cues, observations, and plan changes into this context; "
+                        "older full resource text may be discarded from future model requests. Reload a specific "
+                        "resource only when exact wording is needed to resolve uncertainty, then update this context "
+                        "again.\n"
+                        "14. Before every non-context tool call and final response, reconcile <LATEST_TOOL_RESULT> "
                         "when present, "
                         "final_goal, immediate_goal, "
-                        "last_result, known_errors, attempted_actions, observations, extraction_plan, and "
+                        "last_result, known_errors, attempted_actions, observations, extraction_strategy, extraction_plan, and "
                         "planned_next_tool. Call update_extraction_context whenever any of those fields should "
                         "change because of non-context evidence, or when the previous update_extraction_context "
                         "failed and the state payload must be corrected. "
@@ -3731,6 +4782,7 @@ def _compact_session_context(context: dict[str, Any]) -> dict[str, Any]:
         "initial_plan",
         "observations",
         "extraction_plan",
+        "extraction_strategy",
         "last_result",
         "known_errors",
         "attempted_actions",
@@ -3739,13 +4791,21 @@ def _compact_session_context(context: dict[str, Any]) -> dict[str, Any]:
         "repair_scope",
         "required_outputs",
         "workflow_contract",
+        "expected_output",
+        "output_contract",
+        "producer_output_plan",
+        "script_manifest_plan",
+        "validation_plan",
+        "workflow_reflections",
     )
     compact: dict[str, Any] = {}
     for key in allowed_keys:
         if key not in context:
             continue
         value = context[key]
-        if isinstance(value, list):
+        if key == "workflow_reflections" and isinstance(value, list):
+            compact[key] = [item for item in value[-6:] if isinstance(item, dict)]
+        elif isinstance(value, list):
             compact[key] = [_preview(str(item), 500) for item in value[-8:]]
         elif isinstance(value, dict):
             compact[key] = value
@@ -3859,6 +4919,215 @@ def _looks_like_sandbox_payload(payload: dict[str, Any]) -> bool:
     if "audit_id" in payload:
         return True
     return any(key in payload for key in ("stdout", "stderr", "stdout_preview", "stderr_preview"))
+
+
+def _workflow_tool_event_note_source(
+    tool: Any,
+    tool_args: dict[str, Any],
+    result: dict[str, Any],
+    state: Any,
+) -> dict[str, Any] | None:
+    if not isinstance(result, dict):
+        return None
+    tool_name = str(getattr(tool, "name", "") or "")
+    if not _is_workflow_note_tool(tool_name, tool_args, result):
+        return None
+
+    sequence = int(state.get(WORKFLOW_EVENT_SEQUENCE_STATE_KEY) or 0) + 1
+    state[WORKFLOW_EVENT_SEQUENCE_STATE_KEY] = sequence
+
+    payload = _parse_skill_script_stdout(result) if tool_name == "run_skill_script" else result
+    if not isinstance(payload, dict):
+        payload = result
+    audit_id = str(payload.get("audit_id") or result.get("audit_id") or _extract_audit_id(payload) or "")
+    if not audit_id and tool_name == "run_skill_script" and tool_args.get("skill_name") == "sandbox-page-analyst":
+        audit_id = WORKFLOW_EVENT_GROUP
+    elif not audit_id and tool_name in {
+        "update_extraction_context",
+        "load_skill",
+        "load_skill_resource",
+        "list_skill_resources",
+        "load_test_fixture_page_to_workspace",
+    }:
+        audit_id = WORKFLOW_EVENT_GROUP
+
+    source: dict[str, Any] = {
+        "event_index": sequence,
+        "tool_name": tool_name,
+        "status": str(payload.get("status") or result.get("status") or ""),
+    }
+    if audit_id:
+        source["audit_id"] = audit_id
+    skill_name = str(result.get("skill_name") or tool_args.get("skill_name") or payload.get("skill_name") or "")
+    file_path = str(result.get("file_path") or tool_args.get("file_path") or payload.get("file_path") or "")
+    if tool_name == "run_skill_script" and file_path.endswith("sandbox_exec.py") and audit_id:
+        source["note_group"] = audit_id
+    else:
+        source["note_group"] = WORKFLOW_EVENT_GROUP
+    if skill_name:
+        source["skill_name"] = skill_name
+    if file_path:
+        source["file_path"] = file_path
+    for key in (
+        "command_index",
+        "exit_code",
+        "message",
+        "summary",
+        "error",
+        "error_type",
+        "guardrail",
+        "required_next",
+        "written_count",
+        "candidate_count",
+        "relevant_count",
+        "expected_count",
+        "actual_count",
+        "missing_required_outputs",
+        "context_state",
+        "immediate_goal",
+    ):
+        if key in payload:
+            source[key] = _compact_latest_value(payload[key], 1_000)
+        elif key in result:
+            source[key] = _compact_latest_value(result[key], 1_000)
+    for key in ("stdout", "stdout_preview", "stderr", "stderr_preview", "content", "instructions"):
+        value = payload.get(key) if key in payload else result.get(key)
+        if value is not None:
+            source[key] = _preview(str(value), 1_000)
+    paths = _compact_output_paths(payload) or _compact_output_paths(result)
+    if paths:
+        source["paths"] = paths
+    artifact_handles = _compact_artifact_handles(result) or _compact_artifact_handles(payload)
+    if artifact_handles:
+        source["artifact_handles"] = artifact_handles
+    return source
+
+
+def _is_workflow_note_tool(tool_name: str, tool_args: dict[str, Any], result: dict[str, Any]) -> bool:
+    if tool_name in {
+        "update_extraction_context",
+        "load_skill",
+        "load_skill_resource",
+        "list_skill_resources",
+        "load_test_fixture_page_to_workspace",
+        "fetch_page_to_workspace",
+        "render_page_to_workspace",
+        "promote_sandbox_extraction",
+        "persist_sandbox_job_extraction",
+        "query_jobs",
+    }:
+        return True
+    if tool_name == "run_skill_script" and tool_args.get("skill_name") == "sandbox-page-analyst":
+        return True
+    return _looks_like_sandbox_payload(result)
+
+
+def _workflow_event_sort_key(event: dict[str, Any]) -> int:
+    try:
+        command_index = int(event.get("command_index") or 0)
+    except (TypeError, ValueError):
+        command_index = 0
+    if command_index > 0:
+        return command_index
+    try:
+        return int(event.get("event_index") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _mark_summarized_workflow_events(state: Any, events: list[dict[str, Any]]) -> None:
+    summarized = state.setdefault(WORKFLOW_SUMMARIZED_EVENTS_STATE_KEY, [])
+    if not isinstance(summarized, list):
+        summarized = []
+        state[WORKFLOW_SUMMARIZED_EVENTS_STATE_KEY] = summarized
+    existing = {int(index) for index in summarized if str(index).isdigit()}
+    for event in events:
+        try:
+            existing.add(int(event.get("event_index") or 0))
+        except (TypeError, ValueError):
+            continue
+    state[WORKFLOW_SUMMARIZED_EVENTS_STATE_KEY] = sorted(index for index in existing if index > 0)
+
+
+def _prune_summarized_workflow_events(llm_request: LlmRequest, notes: list[Any], state: Any) -> None:
+    summarized = state.get(WORKFLOW_SUMMARIZED_EVENTS_STATE_KEY)
+    if not isinstance(summarized, list):
+        return
+    summarized_indexes = {int(index) for index in summarized if str(index).isdigit()}
+    if not summarized_indexes:
+        return
+    latest_note_by_audit = _latest_note_by_audit(notes)
+    event_index = 0
+    for content in llm_request.contents:
+        for part in content.parts or []:
+            response = getattr(part, "function_response", None)
+            if not response:
+                continue
+            if str(response.name or "") == "run_skill_script":
+                continue
+            payload = response.response or {}
+            if not isinstance(payload, dict):
+                continue
+            event_index += 1
+            if event_index not in summarized_indexes:
+                continue
+            if _is_workflow_event_placeholder(payload):
+                continue
+            response.response = _summarized_workflow_event_placeholder(
+                tool_name=str(response.name or ""),
+                payload=payload,
+                event_index=event_index,
+                latest_note_by_audit=latest_note_by_audit,
+            )
+
+
+def _is_workflow_event_placeholder(payload: dict[str, Any]) -> bool:
+    return str(payload.get("status") or "") in {
+        "workflow_event_context_removed_after_note_refinement",
+        "sandbox_context_removed_after_note_refinement",
+        "sandbox_context_removed_after_completion",
+        "resource_context_removed_after_state_update",
+        "resource_context_compacted_keep_latest_only",
+    }
+
+
+def _summarized_workflow_event_placeholder(
+    *,
+    tool_name: str,
+    payload: dict[str, Any],
+    event_index: int,
+    latest_note_by_audit: dict[str, Any],
+) -> dict[str, Any]:
+    parsed = _parse_skill_script_stdout(payload) if tool_name == "run_skill_script" else payload
+    if not isinstance(parsed, dict):
+        parsed = payload
+    audit_id = str(parsed.get("audit_id") or payload.get("audit_id") or _extract_audit_id(parsed) or WORKFLOW_EVENT_GROUP)
+    placeholder: dict[str, Any] = {
+        "status": "workflow_event_context_removed_after_note_refinement",
+        "tool_name": tool_name,
+        "event_index": event_index,
+        "audit_id": audit_id,
+        "original_status": str(parsed.get("status") or payload.get("status") or ""),
+        "reason": (
+            "This older ADK tool response was fused into a runtime note under 200 words. "
+            "The latest unsummarized tool response remains available in full."
+        ),
+    }
+    for key in ("skill_name", "file_path", "command_index", "exit_code", "guardrail", "error", "error_type"):
+        if key in parsed:
+            placeholder[key] = _compact_latest_value(parsed[key], 500)
+        elif key in payload:
+            placeholder[key] = _compact_latest_value(payload[key], 500)
+    paths = _compact_output_paths(parsed) or _compact_output_paths(payload)
+    if paths:
+        placeholder["paths"] = paths
+    artifact_handles = _compact_artifact_handles(payload) or _compact_artifact_handles(parsed)
+    if artifact_handles:
+        placeholder["artifact_handles"] = artifact_handles
+    latest_note = latest_note_by_audit.get(audit_id) or latest_note_by_audit.get(WORKFLOW_EVENT_GROUP)
+    if latest_note:
+        placeholder["latest_runtime_note"] = latest_note
+    return placeholder
 
 
 def _mark_summarized_commands(
@@ -4424,12 +5693,13 @@ def _sandbox_status_command() -> str:
         "from pathlib import Path\n"
         "import json\n"
         "required = [\n"
-        "  'output/extractor.py',\n"
         "  'output/page_profile.json',\n"
         "  'output/extraction_strategy.json',\n"
+        "  'output/extraction_run.json',\n"
         "  'output/candidates.json',\n"
         "  'output/validation.json',\n"
         "  'output/final.json',\n"
+        "  'output/run_summary.md',\n"
         "  'output/reference_proposal.md',\n"
         "  'output/reference_proposal.json',\n"
         "]\n"
@@ -4439,7 +5709,7 @@ def _sandbox_status_command() -> str:
         "  'status': 'sandbox_running',\n"
         "  'page_files': page_files,\n"
         "  'missing_required_outputs': missing,\n"
-        "  'required_next': 'Continue the sandbox workflow: inspect page evidence, derive patterns, write/run extractor code, persist protocol files from extractor output, validate, then finalize.',\n"
+        "  'required_next': 'Continue the sandbox workflow: inspect page evidence, derive patterns, write supporting scripts or outputs with accountable run artifacts, validate, then finalize.',\n"
         "  'allowed_parser_dependencies': 'Python standard library unless verified installed inside sandbox',\n"
         "}\n"
         "print(json.dumps(payload, ensure_ascii=True))\n"

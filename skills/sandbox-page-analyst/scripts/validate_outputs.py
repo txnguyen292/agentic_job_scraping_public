@@ -19,9 +19,10 @@ logger.remove()
 logger.add(sys.stderr, level=os.getenv("JOB_SCRAPER_SCRIPT_LOG_LEVEL", "WARNING"))
 
 VALIDATE_HELP = """\
-Use after extractor-backed protocol files are written and before
+Use after accountable extraction protocol files are written and before
 sandbox_finalize.py. The directory should contain page_profile.json,
-extraction_strategy.json, candidates.json, validation.json, and final.json.
+extraction_strategy.json, extraction_run.json, candidates.json,
+validation.json, final.json, and run_summary.md.
 
 Examples:
   validate_outputs.py output
@@ -38,9 +39,11 @@ app = typer.Typer(
 REQUIRED_FILES = {
     "page_profile": "page_profile.json",
     "extraction_strategy": "extraction_strategy.json",
+    "extraction_run": "extraction_run.json",
     "candidates": "candidates.json",
     "validation": "validation.json",
     "final": "final.json",
+    "run_summary": "run_summary.md",
 }
 
 ITVIEC_DETAIL_URL_PATTERN = re.compile(
@@ -50,6 +53,45 @@ EXPECTED_FIXTURES = {
     ("itviec.com", "/it-jobs/ai-engineer/ha-noi"): "tests/fixtures/itviec_ai_engineer_ha_noi.expected.json",
 }
 COMPARE_FIELDS = ("title", "company_name", "location_raw", "salary_raw")
+EVIDENCE_REQUIRED_FIELDS = (
+    "title",
+    "company_name",
+    "job_url",
+    "source_url",
+    "location_raw",
+    "location",
+    "remote_type",
+    "employment_type",
+    "posted_at",
+    "salary_raw",
+    "description_text",
+    "description",
+    "relevance_reason",
+    "tags",
+)
+MAX_EVIDENCE_CHUNK_TOKENS = 3000
+REQUIRED_OBSERVED_FIELD_STATUSES = {
+    "available",
+    "observed",
+    "required",
+    "required_observed",
+    "observed_required",
+}
+PLACEHOLDER_FIELD_VALUES = {
+    "",
+    "-",
+    "--",
+    "n/a",
+    "na",
+    "none",
+    "null",
+    "not available",
+    "not found",
+    "tbd",
+    "to be determined",
+    "unknown",
+    "unavailable",
+}
 
 
 def validate_output_dir(output_dir: Path) -> dict[str, Any]:
@@ -62,7 +104,8 @@ def validate_output_dir(output_dir: Path) -> dict[str, Any]:
         if not path.exists():
             missing_files.append(str(path))
             continue
-        _load_json(path)
+        if path.suffix == ".json":
+            _load_json(path)
         refs[key] = {
             "path": str(Path("output") / filename),
             "sha256": _sha256_file(path),
@@ -73,6 +116,18 @@ def validate_output_dir(output_dir: Path) -> dict[str, Any]:
     candidates = _load_json(output_dir / "candidates.json")
     validation = _load_json(output_dir / "validation.json")
     final = _load_json(output_dir / "final.json")
+    extraction_run = _load_json(output_dir / "extraction_run.json")
+    _validate_extraction_run(output_dir, extraction_run)
+    _validate_run_summary(output_dir / "run_summary.md")
+    script_manifest = _load_optional_json(output_dir / "script_manifest.json")
+    _validate_script_manifest(output_dir, script_manifest)
+    _validate_required_proposals(output_dir, extraction_run)
+    evidence_index = _load_evidence_index(output_dir)
+    if evidence_index is not None:
+        refs["evidence_index"] = {
+            "path": "evidence/index.json",
+            "sha256": _sha256_file(evidence_index["path"]),
+        }
     if "jobs" not in candidates:
         if "result" in candidates:
             raise ValueError(
@@ -97,6 +152,8 @@ def validate_output_dir(output_dir: Path) -> dict[str, Any]:
             text = str(evidence.get("text") or "")
             if len(text) > 500:
                 raise ValueError(f"job {index} evidence text exceeds 500 chars")
+    _validate_observed_required_fields(extraction_run, jobs, "job")
+    _validate_evidence_citations(jobs, evidence_index, "job")
 
     candidate_count = int((candidates.get("crawl") or {}).get("candidate_count") or len(jobs))
     validation_count = int(validation.get("candidate_count") or len(jobs))
@@ -117,11 +174,18 @@ def validate_output_dir(output_dir: Path) -> dict[str, Any]:
         raise ValueError("final.json result.jobs must be a list")
     if len(final_jobs) != len(jobs):
         raise ValueError("final.json result.jobs count must match candidates.jobs")
+    if evidence_index is None and (_jobs_reference_evidence(jobs) or _jobs_reference_evidence(final_jobs)):
+        raise ValueError(
+            "evidence/index.json is required when jobs cite evidence refs; save exact chunks and mark loaded refs "
+            "before validation/finalization"
+        )
     for index, job in enumerate(final_jobs):
         if not isinstance(job, dict):
             raise ValueError(f"final.json result.jobs[{index}] must be an object")
         _validate_job_types(job, f"final.json result.jobs[{index}]")
         _validate_job_url(job, f"final.json result.jobs[{index}]")
+    _validate_observed_required_fields(extraction_run, final_jobs, "final.json result.jobs")
+    _validate_evidence_citations(final_jobs, evidence_index, "final.json result.jobs")
     if final.get("status") == "success" and not jobs:
         raise ValueError("final.json cannot be success with zero extracted jobs")
     _validate_itviec_listing_coverage(output_dir, candidates, final, jobs)
@@ -140,6 +204,201 @@ def _load_json(path: Path) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError(f"{path} must contain a JSON object")
     return payload
+
+
+def _validate_extraction_run(output_dir: Path, payload: dict[str, Any]) -> None:
+    observations = payload.get("observations")
+    if not isinstance(observations, list) or not observations:
+        raise ValueError("extraction_run.json observations must describe the page/layout signals used")
+    strategy = str(payload.get("chosen_strategy") or payload.get("strategy") or "").strip()
+    if not strategy:
+        raise ValueError("extraction_run.json chosen_strategy is required")
+    expected_output = payload.get("expected_output")
+    if not isinstance(expected_output, dict):
+        raise ValueError("extraction_run.json expected_output must be an object")
+    _validate_expected_field_availability_contract(expected_output)
+    validation = payload.get("validation")
+    if validation is not None and not isinstance(validation, dict):
+        raise ValueError("extraction_run.json validation must be an object when present")
+
+
+def _validate_expected_field_availability_contract(expected_output: dict[str, Any]) -> None:
+    available_fields = expected_output.get("available_fields")
+    if not isinstance(available_fields, dict) or not available_fields:
+        raise ValueError("extraction_run.json expected_output.available_fields must be a non-empty object")
+    field_basis = expected_output.get("field_basis")
+    if not isinstance(field_basis, dict):
+        raise ValueError("extraction_run.json expected_output.field_basis must be an object")
+    for field in _required_observed_fields(expected_output):
+        if not str(field_basis.get(field) or "").strip():
+            raise ValueError(
+                f"extraction_run.json expected_output.field_basis.{field} is required for required_observed fields"
+            )
+
+
+def _validate_observed_required_fields(
+    extraction_run: dict[str, Any],
+    jobs: list[Any],
+    label: str,
+) -> None:
+    expected_output = extraction_run.get("expected_output")
+    if not isinstance(expected_output, dict):
+        return
+    required_fields = _required_observed_fields(expected_output)
+    if not required_fields:
+        return
+    for index, job in enumerate(jobs):
+        if not isinstance(job, dict):
+            continue
+        for field in required_fields:
+            if _is_placeholder_field_value(job.get(field)):
+                raise ValueError(
+                    f"{label} {index} field {field} is required by "
+                    "extraction_run.json expected_output.available_fields but is missing or placeholder"
+                )
+
+
+def _required_observed_fields(expected_output: dict[str, Any]) -> list[str]:
+    fields: set[str] = set()
+    direct_fields = expected_output.get("required_observed_fields")
+    if isinstance(direct_fields, list):
+        fields.update(str(item).strip() for item in direct_fields if str(item).strip())
+    available_fields = expected_output.get("available_fields")
+    if isinstance(available_fields, dict):
+        for field, status in available_fields.items():
+            field_name = str(field).strip()
+            if not field_name:
+                continue
+            if _is_required_observed_status(status):
+                fields.add(field_name)
+    return sorted(fields)
+
+
+def _is_required_observed_status(status: Any) -> bool:
+    if isinstance(status, bool):
+        return status
+    if isinstance(status, str):
+        normalized = status.strip().lower().replace("-", "_").replace(" ", "_")
+        return normalized in REQUIRED_OBSERVED_FIELD_STATUSES
+    if isinstance(status, dict):
+        if bool(status.get("required")) or bool(status.get("required_when_observed")):
+            return True
+        for key in ("status", "availability", "requirement"):
+            value = status.get(key)
+            if isinstance(value, str) and _is_required_observed_status(value):
+                return True
+    return False
+
+
+def _is_placeholder_field_value(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return value.strip().lower() in PLACEHOLDER_FIELD_VALUES
+    if isinstance(value, list):
+        return not any(not _is_placeholder_field_value(item) for item in value)
+    return False
+
+
+def _validate_run_summary(path: Path) -> None:
+    text = path.read_text(encoding="utf-8", errors="replace").strip()
+    if len(text) < 80:
+        raise ValueError("output/run_summary.md must summarize what the agent did and how validation ended")
+
+
+def _validate_script_manifest(output_dir: Path, manifest: dict[str, Any]) -> None:
+    workspace = output_dir.parent
+    authored_scripts = _authored_supporting_scripts(workspace)
+    if authored_scripts and not manifest:
+        raise ValueError(
+            "output/script_manifest.json is required when the agent writes supporting scripts; record path, "
+            "purpose, inputs, outputs, hash, workflow/reference version, reuse classification, and validation result"
+        )
+    if not manifest:
+        return
+    scripts = manifest.get("scripts")
+    if not isinstance(scripts, list) or not scripts:
+        raise ValueError("script_manifest.json scripts must include every authored supporting script")
+    by_path: dict[str, dict[str, Any]] = {}
+    workspace_root = workspace.resolve()
+    for index, entry in enumerate(scripts):
+        if not isinstance(entry, dict):
+            raise ValueError(f"script_manifest.json scripts[{index}] must be an object")
+        relative_path = str(entry.get("path") or "").strip()
+        if not relative_path:
+            raise ValueError(f"script_manifest.json scripts[{index}] missing path")
+        script_path = (workspace / relative_path).resolve()
+        if script_path != workspace_root and workspace_root not in script_path.parents:
+            raise ValueError(f"script_manifest.json script {relative_path} path escapes workspace")
+        if not script_path.exists() or not script_path.is_file():
+            raise ValueError(f"script_manifest.json script {relative_path} does not exist")
+        if not str(entry.get("purpose") or "").strip():
+            raise ValueError(f"script_manifest.json script {relative_path} missing purpose")
+        if "inputs" in entry and not isinstance(entry["inputs"], list):
+            raise ValueError(f"script_manifest.json script {relative_path} inputs must be a list")
+        if "outputs" in entry and not isinstance(entry["outputs"], list):
+            raise ValueError(f"script_manifest.json script {relative_path} outputs must be a list")
+        recorded_hash = str(entry.get("sha256") or "").strip()
+        actual_hash = _sha256_file(script_path)
+        if recorded_hash and recorded_hash != actual_hash:
+            raise ValueError(f"script_manifest.json script {relative_path} sha256 does not match file content")
+        if not str(entry.get("workflow_version") or entry.get("reference_version") or "").strip():
+            raise ValueError(f"script_manifest.json script {relative_path} missing workflow_version or reference_version")
+        if not str(entry.get("reuse") or entry.get("reuse_classification") or "").strip():
+            raise ValueError(f"script_manifest.json script {relative_path} missing reuse classification")
+        by_path[relative_path] = entry
+    missing = sorted(path for path in authored_scripts if path not in by_path)
+    if missing:
+        raise ValueError(f"script_manifest.json missing authored supporting scripts: {', '.join(missing)}")
+
+
+def _authored_supporting_scripts(workspace: Path) -> list[str]:
+    candidates: list[Path] = []
+    for relative_dir in ("scratch", "output"):
+        root = workspace / relative_dir
+        if root.exists():
+            candidates.extend(path for path in root.rglob("*.py") if path.is_file())
+    return sorted(
+        str(path.relative_to(workspace))
+        for path in candidates
+        if "__pycache__" not in path.parts and not path.name.startswith(".")
+    )
+
+
+def _validate_required_proposals(output_dir: Path, extraction_run: dict[str, Any]) -> None:
+    if _truthy_flag(
+        extraction_run,
+        "layout_drift_observed",
+        "reference_update_needed",
+        "reference_update_proposal_required",
+    ):
+        if not (
+            (output_dir / "reference_update_proposal.md").exists()
+            or (output_dir / "reference_proposal.md").exists()
+        ):
+            raise ValueError(
+                "layout/reference drift was recorded; write output/reference_update_proposal.md "
+                "or output/reference_proposal.md before validation/finalization"
+            )
+    if _truthy_flag(extraction_run, "skill_update_needed", "skill_update_proposal_required"):
+        if not (
+            (output_dir / "skill_update_proposal.md").exists()
+            or (output_dir / "skill_patch.json").exists()
+        ):
+            raise ValueError(
+                "skill/workflow update was recorded; write output/skill_update_proposal.md "
+                "or output/skill_patch.json before validation/finalization"
+            )
+
+
+def _truthy_flag(payload: dict[str, Any], *keys: str) -> bool:
+    for key in keys:
+        value = payload.get(key)
+        if isinstance(value, bool) and value:
+            return True
+        if isinstance(value, str) and value.strip().lower() in {"1", "true", "yes", "needed", "required"}:
+            return True
+    return False
 
 
 def _validate_job_types(job: dict[str, Any], label: str) -> None:
@@ -179,6 +438,135 @@ def _validate_job_url(job: dict[str, Any], label: str) -> None:
         raise ValueError(f"{label} ITviec job_url must not be a navigation/category URL")
 
 
+def _load_evidence_index(output_dir: Path) -> dict[str, Any] | None:
+    workspace = output_dir.parent
+    index_path = workspace / "evidence" / "index.json"
+    if not index_path.exists():
+        return None
+    payload = _load_json(index_path)
+    chunks = payload.get("chunks")
+    if not isinstance(chunks, list):
+        raise ValueError("evidence/index.json chunks must be a list")
+    indexed_chunks: dict[str, dict[str, Any]] = {}
+    workspace_root = workspace.resolve()
+    for index, chunk in enumerate(chunks):
+        if not isinstance(chunk, dict):
+            raise ValueError(f"evidence/index.json chunks[{index}] must be an object")
+        chunk_id = str(chunk.get("chunk_id") or chunk.get("id") or "").strip()
+        if not chunk_id:
+            raise ValueError(f"evidence/index.json chunks[{index}] missing chunk_id")
+        if chunk_id in indexed_chunks:
+            raise ValueError(f"evidence/index.json duplicate chunk_id {chunk_id}")
+        relative_path = str(chunk.get("path") or "").strip()
+        if not relative_path:
+            raise ValueError(f"evidence/index.json chunk {chunk_id} missing path")
+        chunk_path = (workspace / relative_path).resolve()
+        if chunk_path != workspace_root and workspace_root not in chunk_path.parents:
+            raise ValueError(f"evidence/index.json chunk {chunk_id} path escapes workspace")
+        if not chunk_path.exists() or not chunk_path.is_file():
+            raise ValueError(f"evidence/index.json chunk {chunk_id} path does not exist: {relative_path}")
+        token_estimate = _coerce_positive_int(chunk.get("token_estimate"))
+        if token_estimate <= 0:
+            raise ValueError(f"evidence/index.json chunk {chunk_id} missing positive token_estimate")
+        if token_estimate > MAX_EVIDENCE_CHUNK_TOKENS:
+            raise ValueError(
+                f"evidence/index.json chunk {chunk_id} token_estimate {token_estimate} exceeds "
+                f"{MAX_EVIDENCE_CHUNK_TOKENS}; split exact evidence into smaller chunks before extraction"
+            )
+        indexed_chunks[chunk_id] = {
+            **chunk,
+            "chunk_id": chunk_id,
+            "path": relative_path,
+            "resolved_path": str(chunk_path),
+            "token_estimate": token_estimate,
+            "loaded": bool(chunk.get("loaded", False)),
+        }
+    return {"path": index_path, "chunks": indexed_chunks}
+
+
+def _validate_evidence_citations(
+    jobs: list[dict[str, Any]],
+    evidence_index: dict[str, Any] | None,
+    label_prefix: str,
+) -> None:
+    if evidence_index is None:
+        return
+    chunks = evidence_index["chunks"]
+    for index, job in enumerate(jobs):
+        if not isinstance(job, dict):
+            continue
+        label = f"{label_prefix} {index}" if label_prefix == "job" else f"{label_prefix}[{index}]"
+        field_rationale = job.get("field_rationale")
+        if not isinstance(field_rationale, dict):
+            raise ValueError(f"{label} missing field_rationale object for evidence-cited extraction")
+        for field in EVIDENCE_REQUIRED_FIELDS:
+            if not _field_has_extracted_value(job.get(field)):
+                continue
+            rationale = field_rationale.get(field)
+            if not isinstance(rationale, dict):
+                raise ValueError(f"{label} field {field} missing field_rationale")
+            rationale_text = str(rationale.get("rationale") or "").strip()
+            if not rationale_text:
+                raise ValueError(f"{label} field {field} missing field_rationale.rationale")
+            refs = rationale.get("evidence_refs")
+            if not isinstance(refs, list) or not refs:
+                raise ValueError(f"{label} field {field} missing field_rationale.evidence_refs")
+            for ref in refs:
+                _validate_loaded_evidence_ref(str(ref), chunks, f"{label} field {field}")
+        for evidence in job.get("evidence") or []:
+            if not isinstance(evidence, dict) or not evidence.get("ref"):
+                continue
+            _validate_loaded_evidence_ref(str(evidence["ref"]), chunks, f"{label} evidence")
+
+
+def _jobs_reference_evidence(jobs: Any) -> bool:
+    if not isinstance(jobs, list):
+        return False
+    for job in jobs:
+        if not isinstance(job, dict):
+            continue
+        for evidence in job.get("evidence") or []:
+            if isinstance(evidence, dict) and evidence.get("ref"):
+                return True
+        field_rationale = job.get("field_rationale")
+        if not isinstance(field_rationale, dict):
+            continue
+        for rationale in field_rationale.values():
+            if isinstance(rationale, dict) and rationale.get("evidence_refs"):
+                return True
+    return False
+
+
+def _final_jobs_from_payload(final: Any) -> Any:
+    if not isinstance(final, dict):
+        return []
+    result = final.get("result")
+    if not isinstance(result, dict):
+        return []
+    return result.get("jobs")
+
+
+def _field_has_extracted_value(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, list):
+        return bool(value)
+    return True
+
+
+def _validate_loaded_evidence_ref(ref: str, chunks: dict[str, dict[str, Any]], label: str) -> None:
+    ref = ref.strip()
+    if not ref:
+        raise ValueError(f"{label} has empty evidence ref")
+    chunk = chunks.get(ref)
+    if chunk is None:
+        raise ValueError(f"{label} evidence ref {ref} not found in evidence/index.json")
+    if not chunk.get("loaded"):
+        raise ValueError(f"{label} evidence ref {ref} was not loaded before extraction")
+
+
 def _validate_itviec_listing_coverage(
     output_dir: Path,
     candidates: dict[str, Any],
@@ -198,8 +586,8 @@ def _validate_itviec_listing_coverage(
         return
     raise ValueError(
         f"ITviec listing evidence expects {expected_count} jobs but candidates.jobs has {len(jobs)}. "
-        "Repair the extractor to emit exactly one job per repeated listing card/detail posting URL, "
-        "or return needs_review with a documented blocker."
+        "Repair evidence loading, output/run record, or serialization so the output emits exactly one job "
+        "per repeated listing card/detail posting URL, or return needs_review with a documented blocker."
     )
 
 

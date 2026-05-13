@@ -38,9 +38,21 @@ DEFAULT_DB_PATH = "data/jobs.db"
 DEFAULT_SOURCE_FILE = "seeds/demo_sources.json"
 DEFAULT_CONTENT_LIMIT = 12_000
 DEFAULT_SANDBOX_APP_ROOT = Path(__file__).resolve().parent
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 PAGE_WORKSPACE_ROOT = Path("data/page_workspace")
 MAX_SESSION_CONTEXT_ITEMS = 12
 MAX_SESSION_CONTEXT_TEXT_CHARS = 700
+TEST_PAGE_FIXTURES: dict[str, dict[str, str]] = {
+    "itviec_ai_engineer_ha_noi": {
+        "fixture_file": "tests/fixtures/itviec_ai_engineer_ha_noi.html",
+        "expected_fixture_file": "tests/fixtures/itviec_ai_engineer_ha_noi.expected.json",
+        "source_url": (
+            "https://itviec.com/it-jobs/ai-engineer/ha-noi"
+            "?job_selected=ai-developer-engineer-consultant-python-llm-nlp-switch-supply-pty-ltd-2549"
+        ),
+        "description": "Frozen ITviec AI Engineer Hanoi listing page used for deterministic extractor tests.",
+    }
+}
 
 
 def fetch_page(url: str, timeout: int = 20, max_chars: int = DEFAULT_CONTENT_LIMIT) -> dict[str, Any]:
@@ -124,12 +136,59 @@ async def render_page_to_workspace(
     return await _store_page_workspace(url=url, content=content, fetch_mode="render", tool_context=tool_context)
 
 
+async def load_test_fixture_page_to_workspace(
+    fixture_name: str = "itviec_ai_engineer_ha_noi",
+    tool_context: ToolContext | None = None,
+) -> dict[str, Any]:
+    """Load a frozen test HTML fixture into the page workspace.
+
+    Use this only for deterministic workflow tests, regression runs, or demos
+    where the agent should write extractor code against fixed HTML instead of
+    fetching a live website. The returned metadata contract matches
+    fetch_page_to_workspace/render_page_to_workspace so the sandbox workflow can
+    start from the saved page artifact without caring where the HTML came from.
+    """
+    fixture = TEST_PAGE_FIXTURES.get(str(fixture_name or "").strip())
+    if fixture is None:
+        return {
+            "status": "error",
+            "error": f"unknown test fixture: {fixture_name}",
+            "available_fixtures": sorted(TEST_PAGE_FIXTURES),
+            "fetch_mode": "test_fixture",
+            "content_bytes": 0,
+            "estimated_tokens": 0,
+            "html_preview": "",
+            "signals": {},
+            "recommended_next": "choose_available_fixture",
+        }
+
+    fixture_path = PROJECT_ROOT / fixture["fixture_file"]
+    try:
+        content = fixture_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        return _page_workspace_error(url=fixture["source_url"], fetch_mode=f"test_fixture:{fixture_name}", error=exc)
+
+    metadata = await _store_page_workspace(
+        url=fixture["source_url"],
+        content=content,
+        fetch_mode=f"test_fixture:{fixture_name}",
+        tool_context=tool_context,
+    )
+    metadata["fixture_name"] = fixture_name
+    metadata["fixture_file"] = str(fixture_path)
+    metadata["expected_fixture_file"] = str(PROJECT_ROOT / fixture["expected_fixture_file"])
+    metadata["description"] = fixture["description"]
+    metadata["recommended_next"] = "load sandbox-page-analyst and start fixture-backed extraction workflow"
+    return metadata
+
+
 def update_extraction_context(
     task_understanding: str = "",
     final_goal: str = "",
     initial_plan: list[str] | None = None,
     observations: list[str] | None = None,
     extraction_plan: list[str] | None = None,
+    extraction_strategy: dict[str, Any] | None = None,
     last_result: Any | None = None,
     known_errors: list[str] | None = None,
     attempted_actions: list[str] | None = None,
@@ -138,6 +197,12 @@ def update_extraction_context(
     repair_scope: dict[str, Any] | None = None,
     required_outputs: list[str] | None = None,
     workflow_contract: dict[str, Any] | None = None,
+    expected_output: dict[str, Any] | None = None,
+    output_contract: dict[str, Any] | None = None,
+    producer_output_plan: dict[str, Any] | None = None,
+    script_manifest_plan: dict[str, Any] | None = None,
+    validation_plan: dict[str, Any] | None = None,
+    workflow_reflections: list[dict[str, Any]] | None = None,
     audit_id: str = "",
     page_id: str = "",
     status: str = "",
@@ -149,13 +214,18 @@ def update_extraction_context(
     task understanding and initial plan before loading skills or inspecting
     resources. Continue using it during a live sandbox workflow after meaningful
     observations, extractor runs, validation errors, repair decisions, or
-    attempted actions. Treat last_result, known_errors, immediate_goal, and
-    planned_next_tool as current-state replacement fields: last_result should
-    summarize only the latest non-context tool result, known_errors should list
-    only active blockers, and planned_next_tool should advance after successful
-    extractor, validation, finalization, or persistence results. This state is
-    ephemeral ADK runtime state for the current session only; it is not written
-    to artifacts, `.contexts/`, or reusable references.
+    attempted actions. Treat initial_plan as the broad workflow plan and
+    extraction_strategy as the current method for turning observed repeated job
+    units into complete outputs. The strategy should be written after a
+    representative unit inspection, enhanced when new evidence adds useful
+    detail, and revised when evidence or validation contradicts it. Treat
+    last_result, known_errors, immediate_goal, and planned_next_tool as
+    current-state replacement fields: last_result should summarize only the
+    latest non-context tool result, known_errors should list only active
+    blockers, and planned_next_tool should advance after successful extractor,
+    validation, finalization, or persistence results. This state is ephemeral
+    ADK runtime state for the current session only; it is not written to
+    artifacts, `.contexts/`, or reusable references.
     """
     if tool_context is None:
         return {
@@ -188,8 +258,15 @@ def update_extraction_context(
     context["observations"] = _merge_text_items(context.get("observations"), observations)
     context["extraction_plan"] = _merge_text_items(context.get("extraction_plan"), extraction_plan)
     context["attempted_actions"] = _merge_text_items(context.get("attempted_actions"), attempted_actions)
+    compact_extraction_strategy = _compact_json_object(extraction_strategy) if extraction_strategy is not None else None
     compact_workflow_contract = _compact_json_object(workflow_contract) if workflow_contract is not None else None
+    compact_expected_output = _compact_json_object(expected_output) if expected_output is not None else None
+    compact_output_contract = _compact_json_object(output_contract) if output_contract is not None else None
+    compact_producer_output_plan = _compact_json_object(producer_output_plan) if producer_output_plan is not None else None
+    compact_script_manifest_plan = _compact_json_object(script_manifest_plan) if script_manifest_plan is not None else None
+    compact_validation_plan = _compact_json_object(validation_plan) if validation_plan is not None else None
     compact_last_result = _compact_json_object(last_result) if last_result is not None else None
+    merged_workflow_reflections = _merge_json_items(context.get("workflow_reflections"), workflow_reflections)
     replacement_known_errors = _replace_text_items(known_errors) if known_errors is not None else None
     normalized_required_outputs = _normalize_required_outputs(required_outputs)
     if not normalized_required_outputs and isinstance(compact_workflow_contract, dict):
@@ -227,10 +304,42 @@ def update_extraction_context(
             context["repair_scope"] = compact_repair_scope
         else:
             context.pop("repair_scope", None)
+    if compact_extraction_strategy is not None:
+        if compact_extraction_strategy:
+            context["extraction_strategy"] = compact_extraction_strategy
+        else:
+            context.pop("extraction_strategy", None)
     if compact_workflow_contract is not None:
         if normalized_required_outputs and not _normalize_required_outputs(compact_workflow_contract.get("required_outputs")):
             compact_workflow_contract["required_outputs"] = normalized_required_outputs
         context["workflow_contract"] = compact_workflow_contract
+    if compact_expected_output is not None:
+        if compact_expected_output:
+            context["expected_output"] = compact_expected_output
+        else:
+            context.pop("expected_output", None)
+    if compact_output_contract is not None:
+        if compact_output_contract:
+            context["output_contract"] = compact_output_contract
+        else:
+            context.pop("output_contract", None)
+    if compact_producer_output_plan is not None:
+        if compact_producer_output_plan:
+            context["producer_output_plan"] = compact_producer_output_plan
+        else:
+            context.pop("producer_output_plan", None)
+    if compact_script_manifest_plan is not None:
+        if compact_script_manifest_plan:
+            context["script_manifest_plan"] = compact_script_manifest_plan
+        else:
+            context.pop("script_manifest_plan", None)
+    if compact_validation_plan is not None:
+        if compact_validation_plan:
+            context["validation_plan"] = compact_validation_plan
+        else:
+            context.pop("validation_plan", None)
+    if workflow_reflections is not None:
+        context["workflow_reflections"] = merged_workflow_reflections
 
     context["updated"] = True
     state[SESSION_EXTRACTION_CONTEXT_STATE_KEY] = context
@@ -246,6 +355,7 @@ def update_extraction_context(
         "initial_plan_count": len(context.get("initial_plan") or []),
         "observations_count": len(context.get("observations") or []),
         "extraction_plan_count": len(context.get("extraction_plan") or []),
+        "extraction_strategy": context.get("extraction_strategy", {}),
         "known_errors_count": len(context.get("known_errors") or []),
         "attempted_actions_count": len(context.get("attempted_actions") or []),
         "immediate_goal": context.get("immediate_goal", ""),
@@ -253,6 +363,12 @@ def update_extraction_context(
         "repair_scope": context.get("repair_scope", {}),
         "required_outputs": context.get("required_outputs", []),
         "workflow_contract": context.get("workflow_contract", {}),
+        "expected_output": context.get("expected_output", {}),
+        "output_contract": context.get("output_contract", {}),
+        "producer_output_plan": context.get("producer_output_plan", {}),
+        "script_manifest_plan": context.get("script_manifest_plan", {}),
+        "validation_plan": context.get("validation_plan", {}),
+        "workflow_reflections_count": len(context.get("workflow_reflections") or []),
     }
 
 
@@ -687,6 +803,32 @@ def _replace_text_items(incoming: Any) -> list[str]:
         if text and text not in items:
             items.append(text)
     return items[-MAX_SESSION_CONTEXT_ITEMS:]
+
+
+def _merge_json_items(existing: Any, incoming: Any) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in _iter_json_items(existing):
+        compact = _compact_json_object(item)
+        signature = json.dumps(compact, ensure_ascii=True, sort_keys=True, default=str)
+        if signature not in seen:
+            items.append(compact)
+            seen.add(signature)
+    for item in _iter_json_items(incoming):
+        compact = _compact_json_object(item)
+        signature = json.dumps(compact, ensure_ascii=True, sort_keys=True, default=str)
+        if signature not in seen:
+            items.append(compact)
+            seen.add(signature)
+    return items[-MAX_SESSION_CONTEXT_ITEMS:]
+
+
+def _iter_json_items(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [item for item in value if item is not None]
+    return [value]
 
 
 def _stale_known_errors_error(

@@ -77,18 +77,80 @@ def workflow_contract_state() -> dict[str, object]:
     required_outputs = [
         "output/page_profile.json",
         "output/extraction_strategy.json",
+        "output/extraction_run.json",
         "output/candidates.json",
         "output/validation.json",
         "output/final.json",
+        "output/run_summary.md",
     ]
     return {
         "updated": True,
         "required_outputs": required_outputs,
         "workflow_contract": {
-            "producer": "output/extractor.py",
+            "agent_role": "agent chooses and owns the extraction method",
+            "script_role": "supporting scripts may inspect, parse, extract, validate, and serialize when recorded",
             "required_outputs": required_outputs,
             "success_gate": "validate and finalize before persistence",
-            "repair_rule": "repair missing outputs at producer",
+            "repair_rule": "repair the failing layer: observations, evidence, method, supporting script, output, or proposal artifact",
+        },
+        "output_contract": {
+            "contract_version": "sandbox-page-analyst-protocol-v1",
+            "extraction_run_json": {
+                "required": ["observations", "chosen_strategy", "expected_output"],
+                "expected_output": {
+                    "required": [
+                        "expected_job_count",
+                        "count_basis",
+                        "count_rationale",
+                        "available_fields",
+                        "field_basis",
+                    ]
+                },
+            },
+            "script_manifest_json": {"scripts_entry_requires_one_of": ["workflow_version", "reference_version"]},
+        },
+        "producer_output_plan": {
+            "required_outputs": required_outputs,
+            "extraction_run": {"required": ["observations", "chosen_strategy", "expected_output"]},
+            "candidates_json": {"required_top_level": ["source", "jobs", "selectors", "crawl", "warnings"]},
+            "final_json": {"required_top_level": ["status", "output_schema", "summary", "result"]},
+            "field_availability": {"required": ["available_fields", "field_basis"]},
+            "script_manifest": {"required_if_supporting_scripts_authored": True},
+            "validation_plan": ["validate_outputs.py", "sandbox_finalize.py"],
+        },
+        "evidence_contract": {
+            "requires_loaded_evidence_refs": True,
+            "requires_field_rationale": True,
+        },
+    }
+
+
+def workflow_output_plan_state(required_outputs: list[str]) -> dict[str, object]:
+    return {
+        "output_contract": {
+            "contract_version": "sandbox-page-analyst-protocol-v1",
+            "extraction_run_json": {
+                "required": ["observations", "chosen_strategy", "expected_output"],
+                "expected_output": {
+                    "required": [
+                        "expected_job_count",
+                        "count_basis",
+                        "count_rationale",
+                        "available_fields",
+                        "field_basis",
+                    ]
+                },
+            },
+            "script_manifest_json": {"scripts_entry_requires_one_of": ["workflow_version", "reference_version"]},
+        },
+        "producer_output_plan": {
+            "required_outputs": required_outputs,
+            "extraction_run": {"required": ["observations", "chosen_strategy", "expected_output"]},
+            "candidates_json": {"required_top_level": ["source", "jobs", "selectors", "crawl", "warnings"]},
+            "final_json": {"required_top_level": ["status", "output_schema", "summary", "result"]},
+            "field_availability": {"required": ["available_fields", "field_basis"]},
+            "script_manifest": {"required_if_supporting_scripts_authored": True},
+            "validation_plan": ["validate_outputs.py", "sandbox_finalize.py"],
         },
     }
 
@@ -646,6 +708,115 @@ def test_note_refinement_plugin_summarizes_previous_batch_and_keeps_newest_comma
     assert "saw job-card markers" in note_text
 
 
+def test_note_refinement_plugin_summarizes_general_adk_events_and_keeps_latest_full() -> None:
+    calls: list[tuple[str, list[object], list[dict[str, object]]]] = []
+
+    def summarizer(audit_id: str, notes: list[object], events: list[dict[str, object]]) -> str:
+        calls.append((audit_id, notes, events))
+        return "Loaded skills, recorded context, then hit validation error. Next inspect source evidence."
+
+    plugin = SandboxNoteRefinementPlugin(command_interval=2, summarizer=summarizer)
+    tool_context = FakeToolContext()
+
+    asyncio.run(
+        plugin.after_tool_callback(
+            tool=SimpleNamespace(name="load_skill"),
+            tool_args={"skill_name": "job-listing-scout"},
+            tool_context=tool_context,
+            result={"skill_name": "job-listing-scout", "instructions": "x" * 500},
+        )
+    )
+    asyncio.run(
+        plugin.after_tool_callback(
+            tool=SimpleNamespace(name="update_extraction_context"),
+            tool_args={"status": "in_progress"},
+            tool_context=tool_context,
+            result={"status": "success", "context_state": "updated", "immediate_goal": "inspect page"},
+        )
+    )
+    asyncio.run(
+        plugin.after_tool_callback(
+            tool=SimpleNamespace(name="run_skill_script"),
+            tool_args={"skill_name": "sandbox-page-analyst", "file_path": "scripts/validate_outputs.py"},
+            tool_context=tool_context,
+            result={
+                "skill_name": "sandbox-page-analyst",
+                "file_path": "scripts/validate_outputs.py",
+                "stderr": "company_name missing",
+                "status": "error",
+                "audit_id": "sandbox_run_test",
+            },
+        )
+    )
+
+    assert calls
+    assert calls[0][0] == "workflow"
+    assert [event["tool_name"] for event in calls[0][2]] == ["load_skill", "update_extraction_context"]
+    assert tool_context.state["_job_scraper_workflow_summarized_events"] == [1, 2]
+    assert tool_context.state[SANDBOX_NOTES_STATE_KEY][-1]["through_event_index"] == 2
+    assert tool_context.state[SANDBOX_NOTES_STATE_KEY][-1]["kept_full_event_index"] == 3
+
+    llm_request = SimpleNamespace(
+        contents=[
+            genai_types.Content(
+                role="user",
+                parts=[
+                    genai_types.Part.from_function_response(
+                        name="load_skill",
+                        response={"skill_name": "job-listing-scout", "instructions": "x" * 500},
+                    )
+                ],
+            ),
+            genai_types.Content(
+                role="user",
+                parts=[
+                    genai_types.Part.from_function_response(
+                        name="update_extraction_context",
+                        response={"status": "success", "context_state": "updated", "immediate_goal": "inspect page"},
+                    )
+                ],
+            ),
+            genai_types.Content(
+                role="user",
+                parts=[
+                    genai_types.Part.from_function_response(
+                        name="run_skill_script",
+                        response={
+                            "skill_name": "sandbox-page-analyst",
+                            "file_path": "scripts/validate_outputs.py",
+                            "stderr": "company_name missing",
+                            "status": "error",
+                            "audit_id": "sandbox_run_test",
+                        },
+                    )
+                ],
+            ),
+        ]
+    )
+
+    asyncio.run(plugin.before_model_callback(callback_context=SimpleNamespace(state=tool_context.state), llm_request=llm_request))
+
+    first_response = llm_request.contents[0].parts[0].function_response.response
+    second_response = llm_request.contents[1].parts[0].function_response.response
+    latest_response = llm_request.contents[2].parts[0].function_response.response
+    assert first_response["status"] == "workflow_event_context_removed_after_note_refinement"
+    assert second_response["status"] == "workflow_event_context_removed_after_note_refinement"
+    assert "x" * 100 not in json.dumps(first_response)
+    assert latest_response["stderr"] == "company_name missing"
+    assert latest_response["status"] == "error"
+    note_text = llm_request.contents[-1].parts[0].text
+    assert note_text.startswith("<RUNTIME_SANDBOX_NOTES>")
+    assert "under 200 words" not in note_text
+    assert "Loaded skills" in note_text
+
+
+def test_note_refinement_prompt_requests_under_200_words() -> None:
+    import inspect
+
+    source = inspect.getsource(SandboxNoteRefinementPlugin._summarize)
+
+    assert "under 200 words" in source
+
 def test_note_refinement_plugin_sorts_parallel_command_callbacks_by_command_index() -> None:
     calls: list[tuple[str, list[object], list[dict[str, object]]]] = []
 
@@ -906,7 +1077,103 @@ def test_workflow_guard_blocks_terminal_text_while_workflow_sandbox_is_running()
     assert replacement is not None
     function_call = replacement.content.parts[0].function_call
     assert function_call.name == "update_extraction_context"
-    assert function_call.args["planned_next_tool"]["file_path"] == "scripts/sandbox_finalize.py"
+    assert function_call.id.startswith("call_runtime_")
+    assert "agent-chosen next tool" in function_call.args["immediate_goal"]
+    assert "planned_next_tool" not in function_call.args
+
+
+def test_model_reasoning_telemetry_surfaces_reasoning_summary_to_state() -> None:
+    from job_scraper.adk_plugins import MODEL_REASONING_TELEMETRY_STATE_KEY, ModelReasoningTelemetryPlugin
+
+    plugin = ModelReasoningTelemetryPlugin(reasoning_effort="high")
+    state: dict[str, object] = {}
+
+    llm_response = LlmResponse(
+        content=genai_types.Content(
+            role="model",
+            parts=[
+                genai_types.Part(text="Compared validator error with extraction strategy.", thought=True),
+                genai_types.Part.from_text(text="Next action recorded."),
+            ],
+        ),
+        model_version="openai/gpt-5.4-mini",
+        usage_metadata=genai_types.GenerateContentResponseUsageMetadata(
+            prompt_token_count=12,
+            candidates_token_count=8,
+            total_token_count=20,
+            thoughts_token_count=5,
+        ),
+    )
+
+    result = asyncio.run(
+        plugin.after_model_callback(
+            callback_context=SimpleNamespace(state=state),
+            llm_response=llm_response,
+        )
+    )
+
+    assert result is None
+    assert state[MODEL_REASONING_TELEMETRY_STATE_KEY] == {
+        "model_version": "openai/gpt-5.4-mini",
+        "reasoning_effort": "high",
+        "thought_part_count": 1,
+        "reasoning_summary_preview": "Compared validator error with extraction strategy.",
+        "thoughts_token_count": 5,
+    }
+    assert llm_response.custom_metadata == {
+        "job_scraper_reasoning": {
+            "model_version": "openai/gpt-5.4-mini",
+            "reasoning_effort": "high",
+            "thought_part_count": 1,
+            "reasoning_summary_preview": "Compared validator error with extraction strategy.",
+            "thoughts_token_count": 5,
+            "adk_web_surface": "model_event_custom_metadata",
+        }
+    }
+
+
+def test_model_reasoning_telemetry_keeps_token_only_reasoning_out_of_chat_thoughts() -> None:
+    from job_scraper.adk_plugins import MODEL_REASONING_TELEMETRY_STATE_KEY, ModelReasoningTelemetryPlugin
+
+    plugin = ModelReasoningTelemetryPlugin(reasoning_effort="high")
+    state: dict[str, object] = {}
+
+    llm_response = LlmResponse(
+        content=genai_types.Content(
+            role="model",
+            parts=[
+                genai_types.Part.from_function_call(
+                    name="update_extraction_context",
+                    args={"immediate_goal": "record next step"},
+                ),
+            ],
+        ),
+        model_version="openai/gpt-5.4-mini",
+        usage_metadata=genai_types.GenerateContentResponseUsageMetadata(
+            prompt_token_count=12,
+            candidates_token_count=8,
+            total_token_count=25,
+            thoughts_token_count=5,
+        ),
+    )
+
+    result = asyncio.run(
+        plugin.after_model_callback(
+            callback_context=SimpleNamespace(state=state),
+            llm_response=llm_response,
+        )
+    )
+
+    assert result is None
+    assert state[MODEL_REASONING_TELEMETRY_STATE_KEY] == {
+        "model_version": "openai/gpt-5.4-mini",
+        "reasoning_effort": "high",
+        "thought_part_count": 0,
+        "thoughts_token_count": 5,
+    }
+    assert len(llm_response.content.parts) == 1
+    assert llm_response.content.parts[0].function_call.name == "update_extraction_context"
+    assert "adk_web_thought_part" not in llm_response.custom_metadata["job_scraper_reasoning"]
 
 
 def test_workflow_guard_accepts_adk_state_shape_without_mutable_mapping() -> None:
@@ -1093,6 +1360,36 @@ def test_workflow_guard_records_page_workspace_after_fetch() -> None:
     }
 
 
+def test_workflow_guard_records_page_workspace_after_fixture_load() -> None:
+    plugin = SandboxWorkflowGuardPlugin()
+    tool_context = FakeToolContext()
+
+    updated = asyncio.run(
+        plugin.after_tool_callback(
+            tool=SimpleNamespace(name="load_test_fixture_page_to_workspace"),
+            tool_args={"fixture_name": "itviec_ai_engineer_ha_noi"},
+            tool_context=tool_context,
+            result={
+                "status": "success",
+                "page_id": "page_fixture",
+                "url": "https://itviec.com/it-jobs/ai-engineer/ha-noi",
+                "artifact_path": "/tmp/page.html",
+                "artifact": {"artifact_name": "pages__page_fixture__page.html"},
+                "metadata_artifact": {"artifact_name": "pages__page_fixture__metadata.json"},
+            },
+        )
+    )
+
+    assert updated is None
+    assert tool_context.state[LAST_PAGE_WORKSPACE_STATE_KEY] == {
+        "page_id": "page_fixture",
+        "url": "https://itviec.com/it-jobs/ai-engineer/ha-noi",
+        "artifact_path": "/tmp/page.html",
+        "page_artifact": "pages__page_fixture__page.html",
+        "metadata_artifact": "pages__page_fixture__metadata.json",
+    }
+
+
 def test_workflow_guard_injects_start_instruction_after_workflow_mode_load_without_active_sandbox() -> None:
     plugin = SandboxWorkflowGuardPlugin()
     state = {
@@ -1130,6 +1427,16 @@ def test_workflow_guard_injects_session_extraction_context() -> None:
             "final_goal": "Extract validated jobs and save them.",
             "observations": ["20 job-card markers", "64 broad links included navigation"],
             "extraction_plan": ["repair extractor to select job-card containers"],
+            "extraction_strategy": {
+                "status": "active",
+                "derived_from": "first representative card plus count probe",
+                "target_units": "one job per repeated job-card container",
+                "unit_boundary": "[data-search--pagination-target='jobCard']",
+                "count_method": "count repeated card containers",
+                "field_patterns": {"company_name": "visible company text near title"},
+                "coverage_plan": "create and load one evidence chunk per card",
+                "revision_policy": "enhance on new field details; revise on validator contradiction",
+            },
             "last_result": {"status": "invalid", "count": 64},
             "known_errors": ["output/final.json missing because extractor is placeholder"],
             "attempted_actions": ["checked output/final.json existence", "read placeholder output/extractor.py"],
@@ -1164,6 +1471,15 @@ def test_workflow_guard_injects_session_extraction_context() -> None:
                     "output/final.json",
                 ],
             },
+            "workflow_reflections": [
+                {
+                    "trigger": "expected_output_count_mismatch",
+                    "lesson": "Count mismatches usually mean coverage is incomplete or scope must be revised.",
+                    "diagnostic_question": "Which repeated units lack evidence or serialized output?",
+                    "state_changing_actions": ["load missing card evidence", "patch omitted-unit serialization"],
+                    "anti_actions": ["rewrite the same candidates payload"],
+                }
+            ],
         }
     }
     llm_request = SimpleNamespace(contents=[])
@@ -1182,14 +1498,22 @@ def test_workflow_guard_injects_session_extraction_context() -> None:
     assert "previous update_extraction_context failed" in injected
     assert "reconcile <LATEST_TOOL_RESULT> when present" in injected
     assert "final_goal, immediate_goal" in injected
+    assert "Treat extraction_strategy as the current" in injected
+    assert "enhance it when new evidence adds field/pattern detail" in injected
     assert "Do not repeat actions that did not change state" in injected
     assert "20 job-card markers" in injected
+    assert "one job per repeated job-card container" in injected
+    assert "visible company text near title" in injected
     assert "checked output/final.json existence" in injected
     assert "repair output/extractor.py" in injected
     assert "planned_next_tool" in injected
     assert "repair_scope" in injected
     assert "workflow_contract" in injected
     assert "required_outputs" in injected
+    assert "workflow_reflections" in injected
+    assert "learned interpretations" in injected
+    assert "expected_output_count_mismatch" in injected
+    assert "rewrite the same candidates payload" in injected
     assert "bounded work order" in injected
     assert "After a successful update_extraction_context action" in injected
 
@@ -1262,6 +1586,120 @@ def test_workflow_guard_skips_successful_context_update_as_latest_tool_result() 
     assert result is None
     injected_texts = [content.parts[0].text for content in llm_request.contents if getattr(content.parts[0], "text", None)]
     assert not any(text.startswith("<LATEST_TOOL_RESULT>") for text in injected_texts)
+
+
+def test_workflow_guard_does_not_resurface_prior_tool_after_successful_context_update() -> None:
+    plugin = SandboxWorkflowGuardPlugin()
+    llm_request = SimpleNamespace(
+        contents=[
+            genai_types.Content(
+                role="user",
+                parts=[
+                    genai_types.Part.from_function_response(
+                        name="run_skill_script",
+                        response={"status": "success", "stdout": '{"job_count":20}'},
+                    )
+                ],
+            ),
+            genai_types.Content(
+                role="user",
+                parts=[
+                    genai_types.Part.from_function_response(
+                        name="update_extraction_context",
+                        response={"status": "success", "context_state": "updated"},
+                    )
+                ],
+            ),
+        ]
+    )
+
+    result = asyncio.run(plugin.before_model_callback(callback_context=SimpleNamespace(state={}), llm_request=llm_request))
+
+    assert result is None
+    injected_texts = [content.parts[0].text for content in llm_request.contents if getattr(content.parts[0], "text", None)]
+    assert not any(text.startswith("<LATEST_TOOL_RESULT>") for text in injected_texts)
+
+
+def test_workflow_guard_prunes_loaded_resource_after_context_update() -> None:
+    plugin = SandboxWorkflowGuardPlugin()
+    full_reference = "workflow mode details " * 600
+    llm_request = SimpleNamespace(
+        contents=[
+            genai_types.Content(
+                role="user",
+                parts=[
+                    genai_types.Part.from_function_response(
+                        name="load_skill_resource",
+                        response={
+                            "status": "success",
+                            "skill_name": "sandbox-page-analyst",
+                            "resource_path": "references/workflow-mode.md",
+                            "content": full_reference,
+                        },
+                    )
+                ],
+            ),
+            genai_types.Content(
+                role="user",
+                parts=[
+                    genai_types.Part.from_function_response(
+                        name="update_extraction_context",
+                        response={"status": "success", "context_state": "updated"},
+                    )
+                ],
+            ),
+        ]
+    )
+
+    result = asyncio.run(plugin.before_model_callback(callback_context=SimpleNamespace(state={}), llm_request=llm_request))
+
+    assert result is None
+    resource_response = llm_request.contents[0].parts[0].function_response.response
+    assert resource_response["status"] == "resource_context_removed_after_state_update"
+    assert resource_response["resource_path"] == "references/workflow-mode.md"
+    assert resource_response["resource_discarded_from_context"] is True
+    assert "SESSION_EXTRACTION_CONTEXT" in resource_response["required_next"]
+    assert resource_response["original_chars"] == len(full_reference)
+    assert resource_response["content_preview"] != full_reference
+    assert "content" not in resource_response
+
+
+def test_workflow_guard_keeps_latest_loaded_resource_until_context_update() -> None:
+    plugin = SandboxWorkflowGuardPlugin()
+    full_reference = "site layout details " * 400
+    llm_request = SimpleNamespace(
+        contents=[
+            genai_types.Content(
+                role="user",
+                parts=[
+                    genai_types.Part.from_function_response(
+                        name="update_extraction_context",
+                        response={"status": "success", "context_state": "updated"},
+                    )
+                ],
+            ),
+            genai_types.Content(
+                role="user",
+                parts=[
+                    genai_types.Part.from_function_response(
+                        name="load_skill_resource",
+                        response={
+                            "status": "success",
+                            "skill_name": "sandbox-page-analyst",
+                            "resource_path": "references/itviec-listing-page.md",
+                            "content": full_reference,
+                        },
+                    )
+                ],
+            ),
+        ]
+    )
+
+    result = asyncio.run(plugin.before_model_callback(callback_context=SimpleNamespace(state={}), llm_request=llm_request))
+
+    assert result is None
+    resource_response = llm_request.contents[1].parts[0].function_response.response
+    assert resource_response["content"] == full_reference
 
 
 def test_workflow_guard_injects_failed_context_update_as_latest_tool_result() -> None:
@@ -1411,9 +1849,11 @@ def test_workflow_guard_allows_sandbox_start_with_workflow_contract() -> None:
     required_outputs = [
         "output/page_profile.json",
         "output/extraction_strategy.json",
+        "output/extraction_run.json",
         "output/candidates.json",
         "output/validation.json",
         "output/final.json",
+        "output/run_summary.md",
     ]
     tool_context.state[SESSION_EXTRACTION_CONTEXT_STATE_KEY] = {
         "updated": True,
@@ -1441,22 +1881,23 @@ def test_workflow_guard_allows_sandbox_start_with_workflow_contract() -> None:
     assert allowed is None
 
 
-def test_workflow_guard_blocks_stdout_only_extractor_source() -> None:
+def test_workflow_guard_allows_stdout_only_extractor_source() -> None:
     plugin = SandboxWorkflowGuardPlugin()
     tool_context = FakeToolContext()
     required_outputs = [
         "output/page_profile.json",
         "output/extraction_strategy.json",
+        "output/extraction_run.json",
         "output/candidates.json",
         "output/validation.json",
         "output/final.json",
+        "output/run_summary.md",
     ]
     tool_context.state[ACTIVE_SANDBOX_STATE_KEY] = {
         "audit_id": "sandbox_run_test",
         "status": "running",
         "mode": "workflow",
     }
-    tool_context.state[SESSION_EXTRACTION_CONTEXT_STATE_KEY] = workflow_contract_state()
     tool_context.state[SESSION_EXTRACTION_CONTEXT_STATE_KEY] = {
         "updated": True,
         "required_outputs": required_outputs,
@@ -1464,9 +1905,10 @@ def test_workflow_guard_blocks_stdout_only_extractor_source() -> None:
             "producer": "output/extractor.py",
             "required_outputs": required_outputs,
         },
+        **workflow_output_plan_state(required_outputs),
     }
 
-    blocked = asyncio.run(
+    allowed = asyncio.run(
         plugin.before_tool_callback(
             tool=SimpleNamespace(name="run_skill_script"),
             tool_args={
@@ -1485,9 +1927,7 @@ def test_workflow_guard_blocks_stdout_only_extractor_source() -> None:
         )
     )
 
-    assert blocked is not None
-    assert blocked["guardrail"] == "workflow_contract_required"
-    assert "output/final.json" in blocked["missing_outputs_in_source"]
+    assert allowed is None
 
 
 def test_workflow_guard_allows_protocol_producer_source() -> None:
@@ -1496,16 +1936,17 @@ def test_workflow_guard_allows_protocol_producer_source() -> None:
     required_outputs = [
         "output/page_profile.json",
         "output/extraction_strategy.json",
+        "output/extraction_run.json",
         "output/candidates.json",
         "output/validation.json",
         "output/final.json",
+        "output/run_summary.md",
     ]
     tool_context.state[ACTIVE_SANDBOX_STATE_KEY] = {
         "audit_id": "sandbox_run_test",
         "status": "running",
         "mode": "workflow",
     }
-    tool_context.state[SESSION_EXTRACTION_CONTEXT_STATE_KEY] = workflow_contract_state()
     tool_context.state[SESSION_EXTRACTION_CONTEXT_STATE_KEY] = {
         "updated": True,
         "required_outputs": required_outputs,
@@ -1513,6 +1954,7 @@ def test_workflow_guard_allows_protocol_producer_source() -> None:
             "producer": "output/extractor.py",
             "required_outputs": required_outputs,
         },
+        **workflow_output_plan_state(required_outputs),
     }
     source = "\n".join(f"Path('{path}').write_text('{{}}')" for path in required_outputs)
 
@@ -1538,15 +1980,17 @@ def test_workflow_guard_allows_protocol_producer_source() -> None:
     assert allowed is None
 
 
-def test_workflow_guard_blocks_placeholder_protocol_producer_source() -> None:
+def test_workflow_guard_allows_placeholder_protocol_producer_source() -> None:
     plugin = SandboxWorkflowGuardPlugin()
     tool_context = FakeToolContext()
     required_outputs = [
         "output/page_profile.json",
         "output/extraction_strategy.json",
+        "output/extraction_run.json",
         "output/candidates.json",
         "output/validation.json",
         "output/final.json",
+        "output/run_summary.md",
     ]
     tool_context.state[ACTIVE_SANDBOX_STATE_KEY] = {
         "audit_id": "sandbox_run_test",
@@ -1560,6 +2004,7 @@ def test_workflow_guard_blocks_placeholder_protocol_producer_source() -> None:
             "producer": "output/extractor.py",
             "required_outputs": required_outputs,
         },
+        **workflow_output_plan_state(required_outputs),
     }
     source = "\n".join(
         [
@@ -1571,7 +2016,7 @@ def test_workflow_guard_blocks_placeholder_protocol_producer_source() -> None:
         ]
     )
 
-    blocked = asyncio.run(
+    allowed = asyncio.run(
         plugin.before_tool_callback(
             tool=SimpleNamespace(name="run_skill_script"),
             tool_args={
@@ -1590,9 +2035,7 @@ def test_workflow_guard_blocks_placeholder_protocol_producer_source() -> None:
         )
     )
 
-    assert blocked is not None
-    assert blocked["guardrail"] == "workflow_contract_required"
-    assert "placeholder" in blocked["placeholder_source_reason"]
+    assert allowed is None
 
 
 def test_workflow_guard_allows_protocol_producer_source_with_output_path_composition() -> None:
@@ -1601,9 +2044,11 @@ def test_workflow_guard_allows_protocol_producer_source_with_output_path_composi
     required_outputs = [
         "output/page_profile.json",
         "output/extraction_strategy.json",
+        "output/extraction_run.json",
         "output/candidates.json",
         "output/validation.json",
         "output/final.json",
+        "output/run_summary.md",
     ]
     tool_context.state[ACTIVE_SANDBOX_STATE_KEY] = {
         "audit_id": "sandbox_run_test",
@@ -1617,6 +2062,7 @@ def test_workflow_guard_allows_protocol_producer_source_with_output_path_composi
             "producer": "output/extractor.py",
             "required_outputs": required_outputs,
         },
+        **workflow_output_plan_state(required_outputs),
     }
     source = "\n".join(
         [
@@ -1624,9 +2070,11 @@ def test_workflow_guard_allows_protocol_producer_source_with_output_path_composi
             "OUT.mkdir(exist_ok=True)",
             "(OUT / 'page_profile.json').write_text('{}')",
             "(OUT / 'extraction_strategy.json').write_text('{}')",
+            "(OUT / 'extraction_run.json').write_text('{}')",
             "(OUT / 'candidates.json').write_text('{}')",
             "(OUT / 'validation.json').write_text('{}')",
             "(OUT / 'final.json').write_text('{}')",
+            "(OUT / 'run_summary.md').write_text('summary')",
         ]
     )
 
@@ -1658,9 +2106,11 @@ def test_workflow_guard_allows_protocol_producer_source_with_literal_output_path
     required_outputs = [
         "output/page_profile.json",
         "output/extraction_strategy.json",
+        "output/extraction_run.json",
         "output/candidates.json",
         "output/validation.json",
         "output/final.json",
+        "output/run_summary.md",
     ]
     tool_context.state[ACTIVE_SANDBOX_STATE_KEY] = {
         "audit_id": "sandbox_run_test",
@@ -1674,6 +2124,7 @@ def test_workflow_guard_allows_protocol_producer_source_with_literal_output_path
             "producer": "output/extractor.py",
             "required_outputs": required_outputs,
         },
+        **workflow_output_plan_state(required_outputs),
     }
     source = "\n".join(f"Path('{path}').write_text('{{}}')" for path in required_outputs)
 
@@ -2002,6 +2453,69 @@ def test_workflow_guard_blocks_validate_outputs_inside_sandbox_exec() -> None:
     assert blocked["blocked_scripts"] == ["scripts/validate_outputs.py"]
 
 
+def test_workflow_guard_blocks_compound_extractor_verification_command() -> None:
+    plugin = SandboxWorkflowGuardPlugin()
+    tool_context = FakeToolContext()
+    tool_context.state[SESSION_EXTRACTION_CONTEXT_STATE_KEY] = workflow_contract_state()
+    tool_context.state[ACTIVE_SANDBOX_STATE_KEY] = {
+        "audit_id": "sandbox_run_test",
+        "status": "running",
+        "mode": "workflow",
+    }
+
+    blocked = asyncio.run(
+        plugin.before_tool_callback(
+            tool=SimpleNamespace(name="run_skill_script"),
+            tool_args={
+                "skill_name": "sandbox-page-analyst",
+                "file_path": "scripts/sandbox_exec.py",
+                "args": [
+                    "--audit-id",
+                    "sandbox_run_test",
+                    "--cmd",
+                    (
+                        "python -m py_compile output/extractor.py && python output/extractor.py && "
+                        "python - <<'PY'\nfrom pathlib import Path\nprint(Path('output/final.json').exists())\nPY"
+                    ),
+                ],
+            },
+            tool_context=tool_context,
+        )
+    )
+
+    assert blocked is not None
+    assert blocked["status"] == "error"
+    assert blocked["terminal"] is False
+    assert blocked["guardrail"] == "compound_producer_verification_command"
+    assert "python output/extractor.py" in blocked["required_next"]
+    assert "validate_outputs.py" in blocked["required_next"]
+
+
+def test_workflow_guard_allows_plain_extractor_run_command() -> None:
+    plugin = SandboxWorkflowGuardPlugin()
+    tool_context = FakeToolContext()
+    tool_context.state[SESSION_EXTRACTION_CONTEXT_STATE_KEY] = workflow_contract_state()
+    tool_context.state[ACTIVE_SANDBOX_STATE_KEY] = {
+        "audit_id": "sandbox_run_test",
+        "status": "running",
+        "mode": "workflow",
+    }
+
+    blocked = asyncio.run(
+        plugin.before_tool_callback(
+            tool=SimpleNamespace(name="run_skill_script"),
+            tool_args={
+                "skill_name": "sandbox-page-analyst",
+                "file_path": "scripts/sandbox_exec.py",
+                "args": ["--audit-id", "sandbox_run_test", "--cmd", "python output/extractor.py"],
+            },
+            tool_context=tool_context,
+        )
+    )
+
+    assert blocked is None
+
+
 def test_workflow_guard_treats_finalize_error_as_repairable_running_sandbox() -> None:
     plugin = SandboxWorkflowGuardPlugin()
     tool_context = FakeToolContext()
@@ -2034,7 +2548,10 @@ def test_workflow_guard_treats_finalize_error_as_repairable_running_sandbox() ->
     assert "scripts/sandbox_write_file.py" in updated["required_next"]
     assert "modify only Docker sandbox workspace artifacts" in updated["required_next"]
     assert tool_context.state[ACTIVE_SANDBOX_STATE_KEY]["status"] == "running"
-    assert tool_context.state[ACTIVE_SANDBOX_STATE_KEY]["last_repair_target"]["producer_hint"] == "output/extractor.py"
+    assert (
+        tool_context.state[ACTIVE_SANDBOX_STATE_KEY]["last_repair_target"]["artifact_hint"]
+        == "accountable protocol outputs"
+    )
 
     replacement = asyncio.run(
         plugin.after_model_callback(
@@ -2051,12 +2568,12 @@ def test_workflow_guard_treats_finalize_error_as_repairable_running_sandbox() ->
     assert replacement is not None
     replacement_call = replacement.content.parts[0].function_call
     assert replacement_call.name == "update_extraction_context"
+    assert replacement_call.id.startswith("call_runtime_")
     assert replacement_call.args["audit_id"] == "sandbox_run_test"
     assert replacement_call.args["status"] == "repairing"
-    assert "sandbox-extraction-debugger" in replacement_call.args["extraction_plan"][0]
-    assert "patch-first repair workflow" in replacement_call.args["extraction_plan"][0]
-    assert replacement_call.args["planned_next_tool"]["tool_name"] == "load_skill"
-    assert replacement_call.args["planned_next_tool"]["skill_name"] == "sandbox-extraction-debugger"
+    assert "Classify the active failure" in replacement_call.args["extraction_plan"][0]
+    assert "agent-chosen repair plan" in replacement_call.args["immediate_goal"]
+    assert "planned_next_tool" not in replacement_call.args
 
 
 def test_workflow_guard_keeps_finalize_repair_target_after_successful_extractor_rerun() -> None:
@@ -2119,7 +2636,8 @@ def test_workflow_guard_blocks_plain_text_while_sandbox_running_without_repair_t
     function_call = replacement.content.parts[0].function_call
     assert function_call.name == "update_extraction_context"
     assert function_call.args["audit_id"] == "sandbox_run_test"
-    assert function_call.args["planned_next_tool"]["file_path"] == "scripts/sandbox_finalize.py"
+    assert "agent-chosen next tool" in function_call.args["immediate_goal"]
+    assert "planned_next_tool" not in function_call.args
 
 
 def test_workflow_guard_blocks_reading_known_missing_protocol_file() -> None:
@@ -2164,7 +2682,8 @@ def test_workflow_guard_blocks_reading_known_missing_protocol_file() -> None:
     assert blocked["guardrail"] == "repair_missing_protocol_output_at_producer"
     assert blocked["path"] == "output/page_profile.json"
     assert "Reading it again cannot repair" in blocked["error"]
-    assert "patch `output/extractor.py`" in blocked["required_next"]
+    assert "inspected evidence/script output" in blocked["required_next"]
+    assert "accountable protocol file" in blocked["required_next"]
 
 
 def test_workflow_guard_injects_finalize_repair_target_before_next_model_call() -> None:
@@ -2219,7 +2738,8 @@ def test_workflow_guard_injects_finalize_repair_target_before_next_model_call() 
     assert "latest sandbox result is actionable repair feedback" in guard_text
     assert "Do not answer the user yet" in guard_text
     assert "sandbox-extraction-debugger" in guard_text
-    assert "official patch-first repair workflow" in guard_text
+    assert "helper serialization" in guard_text
+    assert "loaded evidence" in guard_text
     assert "ITviec listing evidence expects 20 jobs but candidates.jobs has 1" in guard_text
 
 
@@ -2253,8 +2773,45 @@ def test_workflow_guard_routes_sandbox_write_validation_errors_to_debugger_skill
     assert "output artifact or sandbox-written script caused the error" in updated["required_next"]
     assert "Treat mounted helper scripts and schemas as read-only specs" in updated["required_next"]
     assert "protocol_model_validation" in updated["required_next"]
-    assert tool_context.state[ACTIVE_SANDBOX_STATE_KEY]["last_repair_target"]["producer_hint"] == "output/extractor.py"
-    assert tool_context.state[ACTIVE_SANDBOX_STATE_KEY]["last_repair_target"]["required_action"] == "debug_repair_extractor"
+    assert (
+        tool_context.state[ACTIVE_SANDBOX_STATE_KEY]["last_repair_target"]["artifact_hint"]
+        == "accountable protocol outputs"
+    )
+    assert tool_context.state[ACTIVE_SANDBOX_STATE_KEY]["last_repair_target"]["required_action"] == "agent_plan_repair"
+
+
+def test_workflow_guard_routes_missing_evidence_index_to_evidence_repair() -> None:
+    plugin = SandboxWorkflowGuardPlugin()
+    tool_context = FakeToolContext()
+    tool_context.state[ACTIVE_SANDBOX_STATE_KEY] = {
+        "audit_id": "sandbox_run_test",
+        "status": "running",
+        "mode": "workflow",
+    }
+
+    updated = asyncio.run(
+        plugin.after_tool_callback(
+            tool=SimpleNamespace(name="run_skill_script"),
+            tool_args={
+                "skill_name": "sandbox-page-analyst",
+                "file_path": "scripts/sandbox_finalize.py",
+                "args": ["--audit-id", "sandbox_run_test"],
+            },
+            tool_context=tool_context,
+            result={
+                "status": "success",
+                "stdout": (
+                    '{"status":"error","audit_id":"sandbox_run_test",'
+                    '"error":"evidence/index.json is required when jobs cite evidence refs"}'
+                ),
+            },
+        )
+    )
+
+    assert updated is not None
+    assert "evidence/chunks/" in updated["required_next"]
+    assert "evidence/index.json" in updated["required_next"]
+    assert "Do not rerun finalization" in updated["required_next"]
 
 
 def test_workflow_guard_routes_rejected_initial_extractor_write_to_rewrite_not_patch() -> None:
@@ -2313,8 +2870,9 @@ def test_workflow_guard_routes_rejected_initial_extractor_write_to_rewrite_not_p
     assert replacement is not None
     function_call = replacement.content.parts[0].function_call
     assert function_call.name == "update_extraction_context"
-    assert "create or rewrite output/extractor.py" in function_call.args["extraction_plan"][0].lower()
-    assert "sandbox_write_file.py" in function_call.args["immediate_goal"]
+    assert "decide the next repair action" in function_call.args["extraction_plan"][0].lower()
+    assert "runtime has recorded the active failure but is not choosing" in function_call.args["immediate_goal"].lower()
+    assert "planned_next_tool" not in function_call.args
 
 
 def test_workflow_guard_records_validate_output_errors_as_repair_targets() -> None:
@@ -2346,8 +2904,8 @@ def test_workflow_guard_records_validate_output_errors_as_repair_targets() -> No
     assert "Load `sandbox-extraction-debugger`" in updated["required_next"]
     target = tool_context.state[ACTIVE_SANDBOX_STATE_KEY]["last_repair_target"]
     assert target["file_path"] == "scripts/validate_outputs.py"
-    assert target["producer_hint"] == "output/extractor.py"
-    assert target["required_action"] == "debug_repair_extractor"
+    assert target["artifact_hint"] == "accountable protocol outputs"
+    assert target["required_action"] == "agent_plan_repair"
     assert "page_profile.json" in target["error"]
 
 
@@ -2385,10 +2943,9 @@ def test_workflow_guard_replaces_final_text_when_debug_repair_target_is_active()
     assert function_call.args["audit_id"] == "sandbox_run_test"
     assert function_call.args["status"] == "repairing"
     assert "page_profile.json" in function_call.args["known_errors"][0]
-    assert "sandbox-extraction-debugger" in function_call.args["immediate_goal"]
-    assert "patch-first producer edit" in function_call.args["immediate_goal"]
-    assert function_call.args["planned_next_tool"]["tool_name"] == "load_skill"
-    assert function_call.args["planned_next_tool"]["skill_name"] == "sandbox-extraction-debugger"
+    assert "agent-chosen repair plan" in function_call.args["immediate_goal"]
+    assert "not choosing the repair tool for the agent" in function_call.args["immediate_goal"]
+    assert "planned_next_tool" not in function_call.args
 
 
 def test_workflow_guard_does_not_replace_final_text_after_context_update_policy_block() -> None:
@@ -2833,7 +3390,7 @@ def test_workflow_guard_clears_immediate_error_repeat_state_after_success() -> N
     assert IMMEDIATE_ERROR_REPEAT_STATE_KEY not in tool_context.state
 
 
-def test_workflow_guard_triggers_on_repeated_protocol_write() -> None:
+def test_workflow_guard_routes_repeated_successful_protocol_write_to_validation() -> None:
     plugin = SandboxWorkflowGuardPlugin()
     tool_context = FakeToolContext()
     tool_context.state[ACTIVE_SANDBOX_STATE_KEY] = {
@@ -2864,9 +3421,12 @@ def test_workflow_guard_triggers_on_repeated_protocol_write() -> None:
     third = asyncio.run(plugin.after_tool_callback(tool=tool, tool_args=tool_args, tool_context=tool_context, result=result))
 
     assert third is not None
-    assert third["status"] == "guardrail_triggered"
+    assert third["status"] == "error"
     assert third["guardrail"] == "repeated_sandbox_tool_result"
+    assert third["terminal"] is False
     assert "sandbox_write_file.py" in third["error"]
+    assert "validate_outputs.py" in third["required_next"]
+    assert tool_context.state[ACTIVE_SANDBOX_STATE_KEY]["status"] == "running"
 
 
 def test_workflow_guard_allows_changed_protocol_write_after_validation_error() -> None:
@@ -2990,6 +3550,145 @@ def test_workflow_guard_blocks_finalize_until_written_extractor_runs() -> None:
     assert "python output/extractor.py" in blocked["required_next"]
 
 
+def test_workflow_guard_blocks_rewriting_extractor_after_successful_run_until_validation() -> None:
+    plugin = SandboxWorkflowGuardPlugin()
+    tool_context = FakeToolContext()
+    tool_context.state[ACTIVE_SANDBOX_STATE_KEY] = {
+        "audit_id": "sandbox_run_test",
+        "status": "running",
+        "mode": "workflow",
+        "extractor_executed": True,
+    }
+    tool_context.state[SESSION_EXTRACTION_CONTEXT_STATE_KEY] = workflow_contract_state()
+
+    blocked = asyncio.run(
+        plugin.before_tool_callback(
+            tool=SimpleNamespace(name="run_skill_script"),
+            tool_args={
+                "skill_name": "sandbox-page-analyst",
+                "file_path": "scripts/sandbox_write_file.py",
+                "args": [
+                    "--audit-id",
+                    "sandbox_run_test",
+                    "--path",
+                    "output/extractor.py",
+                    "--content",
+                    "print('rewritten')",
+                ],
+            },
+            tool_context=tool_context,
+        )
+    )
+
+    assert blocked is not None
+    assert blocked["guardrail"] == "validate_or_finalize_after_successful_producer_run"
+    assert "validate_outputs.py" in blocked["required_next"]
+    assert "sandbox_finalize.py" in blocked["required_next"]
+
+
+def test_workflow_guard_allows_extractor_patch_after_fresh_validator_error() -> None:
+    plugin = SandboxWorkflowGuardPlugin()
+    tool_context = FakeToolContext()
+    tool_context.state[ACTIVE_SANDBOX_STATE_KEY] = {
+        "audit_id": "sandbox_run_test",
+        "status": "running",
+        "mode": "workflow",
+        "extractor_executed": True,
+        "last_repair_target": {
+            "file_path": "scripts/validate_outputs.py",
+            "producer_hint": "output/extractor.py",
+            "required_action": "debug_repair_extractor",
+            "error": "candidates.crawl must be an object",
+        },
+    }
+    tool_context.state[SESSION_EXTRACTION_CONTEXT_STATE_KEY] = workflow_contract_state()
+
+    allowed = asyncio.run(
+        plugin.before_tool_callback(
+            tool=SimpleNamespace(name="run_skill_script"),
+            tool_args={
+                "skill_name": "sandbox-page-analyst",
+                "file_path": "scripts/sandbox_apply_patch.py",
+                "args": [
+                    "--audit-id",
+                    "sandbox_run_test",
+                    "--path",
+                    "output/extractor.py",
+                    "--old",
+                    "old",
+                    "--new",
+                    "new",
+                ],
+            },
+            tool_context=tool_context,
+        )
+    )
+
+    assert allowed is None
+
+
+def test_workflow_guard_allows_extractor_patch_after_finalizer_fixture_diff_target() -> None:
+    plugin = SandboxWorkflowGuardPlugin()
+    tool_context = FakeToolContext()
+    tool_context.state[ACTIVE_SANDBOX_STATE_KEY] = {
+        "audit_id": "sandbox_run_test",
+        "status": "running",
+        "mode": "workflow",
+        "extractor_executed": True,
+        "last_repair_target": {
+            "file_path": "scripts/sandbox_finalize.py",
+            "producer_hint": "output/extractor.py",
+            "error": "fixture-diff mismatch: company_name expected OpenAI but got unknown",
+        },
+    }
+    tool_context.state[SESSION_EXTRACTION_CONTEXT_STATE_KEY] = workflow_contract_state()
+
+    allowed = asyncio.run(
+        plugin.before_tool_callback(
+            tool=SimpleNamespace(name="run_skill_script"),
+            tool_args={
+                "skill_name": "sandbox-page-analyst",
+                "file_path": "scripts/sandbox_apply_patch.py",
+                "args": [
+                    "--audit-id",
+                    "sandbox_run_test",
+                    "--path",
+                    "output/extractor.py",
+                    "--old",
+                    "company = 'unknown'",
+                    "--new",
+                    "company = parsed_company",
+                ],
+            },
+            tool_context=tool_context,
+        )
+    )
+
+    assert allowed is None
+
+
+def test_workflow_guard_redirects_debugger_skill_helper_calls_to_page_analyst() -> None:
+    plugin = SandboxWorkflowGuardPlugin()
+    tool_context = FakeToolContext()
+
+    blocked = asyncio.run(
+        plugin.before_tool_callback(
+            tool=SimpleNamespace(name="run_skill_script"),
+            tool_args={
+                "skill_name": "sandbox-extraction-debugger",
+                "file_path": "scripts/sandbox_read.py",
+                "args": ["--help"],
+            },
+            tool_context=tool_context,
+        )
+    )
+
+    assert blocked is not None
+    assert blocked["guardrail"] == "sandbox_helpers_live_under_page_analyst_skill"
+    assert blocked["requested_skill_name"] == "sandbox-extraction-debugger"
+    assert 'skill_name "sandbox-page-analyst"' in blocked["required_next"]
+
+
 def test_workflow_guard_marks_patched_extractor_pending_until_rerun() -> None:
     plugin = SandboxWorkflowGuardPlugin()
     tool_context = FakeToolContext()
@@ -3070,13 +3769,97 @@ def test_workflow_guard_blocks_validate_until_patched_extractor_reruns() -> None
     assert "python output/extractor.py" in blocked["required_next"]
 
 
-def test_workflow_guard_blocks_direct_protocol_output_write() -> None:
+def test_workflow_guard_blocks_protocol_output_write_without_expected_output() -> None:
     plugin = SandboxWorkflowGuardPlugin()
     tool_context = FakeToolContext()
     tool_context.state[ACTIVE_SANDBOX_STATE_KEY] = {
         "audit_id": "sandbox_run_test",
         "status": "running",
         "mode": "workflow",
+    }
+    tool_context.state[SESSION_EXTRACTION_CONTEXT_STATE_KEY] = workflow_contract_state()
+
+    blocked = asyncio.run(
+        plugin.before_tool_callback(
+            tool=SimpleNamespace(name="run_skill_script"),
+            tool_args={
+                "skill_name": "sandbox-page-analyst",
+                "file_path": "scripts/sandbox_write_file.py",
+                "args": [
+                    "--audit-id",
+                    "sandbox_run_test",
+                    "--path",
+                    "output/candidates.json",
+                    "--content",
+                    '{"jobs":[]}',
+                ],
+            },
+            tool_context=tool_context,
+        )
+    )
+
+    assert blocked is not None
+    assert blocked["guardrail"] == "expected_output_required"
+    assert "expected_output.expected_job_count" in blocked["error"]
+
+
+def test_workflow_guard_blocks_output_producer_write_until_contract_plan_recorded() -> None:
+    plugin = SandboxWorkflowGuardPlugin()
+    tool_context = FakeToolContext()
+    tool_context.state[ACTIVE_SANDBOX_STATE_KEY] = {
+        "audit_id": "sandbox_run_test",
+        "status": "running",
+        "mode": "workflow",
+    }
+    context = workflow_contract_state()
+    context.pop("output_contract", None)
+    context.pop("producer_output_plan", None)
+    tool_context.state[SESSION_EXTRACTION_CONTEXT_STATE_KEY] = context
+
+    blocked = asyncio.run(
+        plugin.before_tool_callback(
+            tool=SimpleNamespace(name="run_skill_script"),
+            tool_args={
+                "skill_name": "sandbox-page-analyst",
+                "file_path": "scripts/sandbox_write_file.py",
+                "args": [
+                    "--audit-id",
+                    "sandbox_run_test",
+                    "--path",
+                    "output/extract_itviec_fixture.py",
+                    "--content",
+                    "print('extract')",
+                ],
+            },
+            tool_context=tool_context,
+        )
+    )
+
+    assert blocked is not None
+    assert blocked["guardrail"] == "producer_output_plan_required"
+    assert blocked["required_next_tool"]["file_path"] == "scripts/protocol_contract.py"
+    assert "producer_output_plan" in blocked["required_next"]
+
+
+def test_workflow_guard_blocks_protocol_write_until_agent_records_producer_plan() -> None:
+    plugin = SandboxWorkflowGuardPlugin()
+    tool_context = FakeToolContext()
+    tool_context.state[ACTIVE_SANDBOX_STATE_KEY] = {
+        "audit_id": "sandbox_run_test",
+        "status": "running",
+        "mode": "workflow",
+    }
+    context = workflow_contract_state()
+    context.pop("producer_output_plan", None)
+    tool_context.state[SESSION_EXTRACTION_CONTEXT_STATE_KEY] = {
+        **context,
+        "expected_output": {
+            "expected_job_count": 0,
+            "count_basis": "no repeated job units observed",
+            "count_rationale": "The prior repeated-unit probe found no job units, so zero successful jobs are expected.",
+            "available_fields": {"title": "not_observed"},
+            "field_basis": {},
+        },
     }
 
     blocked = asyncio.run(
@@ -3099,12 +3882,12 @@ def test_workflow_guard_blocks_direct_protocol_output_write() -> None:
     )
 
     assert blocked is not None
-    assert blocked["status"] == "error"
-    assert blocked["guardrail"] == "extractor_must_persist_protocol_outputs"
-    assert blocked["path"] == "output/candidates.json"
+    assert blocked["guardrail"] == "producer_output_plan_required"
+    assert blocked["required_next_tool"]["tool_name"] == "update_extraction_context"
+    assert "script_manifest" in blocked["required_next_tool"]["producer_output_plan"]
 
 
-def test_workflow_guard_blocks_direct_protocol_output_write_after_extractor_runs() -> None:
+def test_workflow_guard_allows_agent_authored_protocol_output_write_after_helper_runs() -> None:
     plugin = SandboxWorkflowGuardPlugin()
     tool_context = FakeToolContext()
     tool_context.state[ACTIVE_SANDBOX_STATE_KEY] = {
@@ -3113,8 +3896,18 @@ def test_workflow_guard_blocks_direct_protocol_output_write_after_extractor_runs
         "mode": "workflow",
         "extractor_executed": True,
     }
+    tool_context.state[SESSION_EXTRACTION_CONTEXT_STATE_KEY] = {
+        **workflow_contract_state(),
+        "expected_output": {
+            "expected_job_count": 0,
+            "count_basis": "no repeated job units observed",
+            "count_rationale": "The prior repeated-unit probe found no job units, so zero successful jobs are expected.",
+            "available_fields": {"title": "not_observed"},
+            "field_basis": {},
+        },
+    }
 
-    blocked = asyncio.run(
+    allowed = asyncio.run(
         plugin.before_tool_callback(
             tool=SimpleNamespace(name="run_skill_script"),
             tool_args={
@@ -3133,8 +3926,333 @@ def test_workflow_guard_blocks_direct_protocol_output_write_after_extractor_runs
         )
     )
 
+    assert allowed is None
+
+
+def test_workflow_guard_requires_expected_output_count_rationale_before_success_write() -> None:
+    plugin = SandboxWorkflowGuardPlugin()
+    tool_context = FakeToolContext()
+    tool_context.state[ACTIVE_SANDBOX_STATE_KEY] = {
+        "audit_id": "sandbox_run_test",
+        "status": "running",
+        "mode": "workflow",
+    }
+    tool_context.state[SESSION_EXTRACTION_CONTEXT_STATE_KEY] = {
+        **workflow_contract_state(),
+        "expected_output": {
+            "expected_job_count": 2,
+            "count_basis": "2 repeated job-card markers",
+        },
+    }
+
+    blocked = asyncio.run(
+        plugin.before_tool_callback(
+            tool=SimpleNamespace(name="run_skill_script"),
+            tool_args={
+                "skill_name": "sandbox-page-analyst",
+                "file_path": "scripts/sandbox_write_file.py",
+                "args": [
+                    "--audit-id",
+                    "sandbox_run_test",
+                    "--path",
+                    "output/candidates.json",
+                    "--content",
+                    json.dumps({"jobs": [{"title": "One"}, {"title": "Two"}]}),
+                ],
+            },
+            tool_context=tool_context,
+        )
+    )
+
     assert blocked is not None
-    assert blocked["guardrail"] == "extractor_must_persist_protocol_outputs"
+    assert blocked["guardrail"] == "expected_output_count_explanation_required"
+    assert blocked["missing"] == ["count_rationale"]
+    assert blocked["unsatisfied_requirements"][0]["id"] == "expected_output_count_derivation_recorded"
+    assert "prior observations" in blocked["unsatisfied_requirements"][0]["agent_responsibility"]
+
+
+def test_workflow_guard_blocks_candidates_count_mismatch_against_expected_output() -> None:
+    plugin = SandboxWorkflowGuardPlugin()
+    tool_context = FakeToolContext()
+    tool_context.state[ACTIVE_SANDBOX_STATE_KEY] = {
+        "audit_id": "sandbox_run_test",
+        "status": "running",
+        "mode": "workflow",
+    }
+    tool_context.state[SESSION_EXTRACTION_CONTEXT_STATE_KEY] = {
+        **workflow_contract_state(),
+        "expected_output": {
+            "expected_job_count": 2,
+            "count_basis": "2 repeated job-card markers",
+            "count_rationale": "A prior selector-count probe found two repeated job-card markers; each marker is one in-scope listing.",
+            "available_fields": {"title": "required_observed"},
+            "field_basis": {"title": "Each repeated job-card marker exposes visible title text."},
+        },
+    }
+
+    blocked = asyncio.run(
+        plugin.before_tool_callback(
+            tool=SimpleNamespace(name="run_skill_script"),
+            tool_args={
+                "skill_name": "sandbox-page-analyst",
+                "file_path": "scripts/sandbox_write_file.py",
+                "args": [
+                    "--audit-id",
+                    "sandbox_run_test",
+                    "--path",
+                    "output/candidates.json",
+                    "--content",
+                    json.dumps({"jobs": [{"title": "One"}]}),
+                ],
+            },
+            tool_context=tool_context,
+        )
+    )
+
+    assert blocked is not None
+    assert blocked["guardrail"] == "expected_output_count_mismatch"
+    assert blocked["expected_job_count"] == 2
+    assert blocked["actual_job_count"] == 1
+    assert blocked["count_basis"] == "2 repeated job-card markers"
+    assert blocked["unsatisfied_requirements"][0]["id"] == "successful_output_matches_expected_job_count"
+    assert "missing prerequisite" in blocked["unsatisfied_requirements"][0]["agent_responsibility"]
+    assert "count_basis" in blocked["unsatisfied_requirements"][0]["agent_responsibility"]
+    assert "inspect available tools/resources" in blocked["unsatisfied_requirements"][0]["agent_responsibility"]
+    assert "same repeated-unit signal" in blocked["unsatisfied_requirements"][0]["acceptable_resolutions"][0]
+    assert "Inspect available tools/resources" in blocked["unsatisfied_requirements"][0]["acceptable_resolutions"][0]
+    assert "Use unsatisfied_requirements" in blocked["required_next"]
+    assert "available tools/resources" in blocked["required_next"]
+    assert "past observations/tool results" in blocked["required_next"]
+
+
+def test_workflow_guard_blocks_final_count_mismatch_against_expected_output() -> None:
+    plugin = SandboxWorkflowGuardPlugin()
+    tool_context = FakeToolContext()
+    tool_context.state[ACTIVE_SANDBOX_STATE_KEY] = {
+        "audit_id": "sandbox_run_test",
+        "status": "running",
+        "mode": "workflow",
+    }
+    tool_context.state[SESSION_EXTRACTION_CONTEXT_STATE_KEY] = {
+        **workflow_contract_state(),
+        "expected_output": {
+            "expected_job_count": 2,
+            "count_basis": "2 repeated detail URLs",
+            "count_rationale": "A prior URL probe found two repeated detail URLs; each URL is one in-scope listing.",
+        },
+    }
+
+    blocked = asyncio.run(
+        plugin.before_tool_callback(
+            tool=SimpleNamespace(name="run_skill_script"),
+            tool_args={
+                "skill_name": "sandbox-page-analyst",
+                "file_path": "scripts/sandbox_write_file.py",
+                "args": [
+                    "--audit-id",
+                    "sandbox_run_test",
+                    "--path",
+                    "output/final.json",
+                    "--content",
+                    json.dumps({"status": "success", "result": {"jobs": [{"title": "One"}]}}),
+                ],
+            },
+            tool_context=tool_context,
+        )
+    )
+
+    assert blocked is not None
+    assert blocked["guardrail"] == "expected_output_count_mismatch"
+    assert blocked["expected_job_count"] == 2
+    assert blocked["actual_job_count"] == 1
+    assert blocked["unsatisfied_requirements"][0]["expected_job_count"] == 2
+
+
+def test_workflow_guard_allows_candidates_count_matching_expected_output() -> None:
+    plugin = SandboxWorkflowGuardPlugin()
+    tool_context = FakeToolContext()
+    tool_context.state[ACTIVE_SANDBOX_STATE_KEY] = {
+        "audit_id": "sandbox_run_test",
+        "status": "running",
+        "mode": "workflow",
+    }
+    tool_context.state[SESSION_EXTRACTION_CONTEXT_STATE_KEY] = {
+        **workflow_contract_state(),
+        "expected_output": {
+            "expected_job_count": 2,
+            "count_basis": "2 repeated job-card markers",
+            "count_rationale": "A prior selector-count probe found two repeated job-card markers; each marker is one in-scope listing.",
+            "available_fields": {"title": "required_observed"},
+            "field_basis": {"title": "Each repeated job-card marker exposes visible title text."},
+        },
+    }
+
+    allowed = asyncio.run(
+        plugin.before_tool_callback(
+            tool=SimpleNamespace(name="run_skill_script"),
+            tool_args={
+                "skill_name": "sandbox-page-analyst",
+                "file_path": "scripts/sandbox_write_file.py",
+                "args": [
+                    "--audit-id",
+                    "sandbox_run_test",
+                    "--path",
+                    "output/candidates.json",
+                    "--content",
+                    json.dumps({"jobs": [{"title": "One"}, {"title": "Two"}]}),
+                ],
+            },
+            tool_context=tool_context,
+        )
+    )
+
+    assert allowed is None
+
+
+def test_workflow_guard_blocks_placeholder_for_required_observed_field() -> None:
+    plugin = SandboxWorkflowGuardPlugin()
+    tool_context = FakeToolContext()
+    tool_context.state[ACTIVE_SANDBOX_STATE_KEY] = {
+        "audit_id": "sandbox_run_test",
+        "status": "running",
+        "mode": "workflow",
+    }
+    tool_context.state[SESSION_EXTRACTION_CONTEXT_STATE_KEY] = {
+        **workflow_contract_state(),
+        "expected_output": {
+            "expected_job_count": 1,
+            "count_basis": "1 repeated job-card marker",
+            "count_rationale": "A prior selector-count probe found one repeated job-card marker.",
+            "available_fields": {
+                "title": "required_observed",
+                "company_name": "required_observed",
+                "job_url": "required_observed",
+            },
+            "field_basis": {
+                "title": "The card exposes title text.",
+                "company_name": "The card exposes company text next to the title.",
+                "job_url": "The card exposes a detail URL.",
+            },
+        },
+    }
+
+    blocked = asyncio.run(
+        plugin.before_tool_callback(
+            tool=SimpleNamespace(name="run_skill_script"),
+            tool_args={
+                "skill_name": "sandbox-page-analyst",
+                "file_path": "scripts/sandbox_write_file.py",
+                "args": [
+                    "--audit-id",
+                    "sandbox_run_test",
+                    "--path",
+                    "output/candidates.json",
+                    "--content",
+                    json.dumps(
+                        {
+                            "jobs": [
+                                {
+                                    "title": "Machine Learning Engineer",
+                                    "company_name": "unknown",
+                                    "job_url": "https://example.com/jobs/ml",
+                                }
+                            ]
+                        }
+                    ),
+                ],
+            },
+            tool_context=tool_context,
+        )
+    )
+
+    assert blocked is not None
+    assert blocked["guardrail"] == "expected_output_field_coverage_mismatch"
+    assert blocked["unsatisfied_requirements"][0]["id"] == "successful_output_matches_observed_field_availability"
+    assert blocked["missing_or_placeholder_fields"] == [{"index": 0, "field": "company_name", "value": "unknown"}]
+
+
+def test_workflow_guard_allows_needs_review_count_mismatch() -> None:
+    plugin = SandboxWorkflowGuardPlugin()
+    tool_context = FakeToolContext()
+    tool_context.state[ACTIVE_SANDBOX_STATE_KEY] = {
+        "audit_id": "sandbox_run_test",
+        "status": "running",
+        "mode": "workflow",
+    }
+    tool_context.state[SESSION_EXTRACTION_CONTEXT_STATE_KEY] = {
+        **workflow_contract_state(),
+        "expected_output": {
+            "expected_job_count": 2,
+            "count_basis": "2 repeated job-card markers",
+            "count_rationale": "A prior selector-count probe found two repeated job-card markers; each marker is one in-scope listing.",
+        },
+    }
+
+    allowed = asyncio.run(
+        plugin.before_tool_callback(
+            tool=SimpleNamespace(name="run_skill_script"),
+            tool_args={
+                "skill_name": "sandbox-page-analyst",
+                "file_path": "scripts/sandbox_write_file.py",
+                "args": [
+                    "--audit-id",
+                    "sandbox_run_test",
+                    "--path",
+                    "output/final.json",
+                    "--content",
+                    json.dumps(
+                        {
+                            "status": "needs_review",
+                            "result": {"jobs": [{"title": "One"}]},
+                            "summary": "one repeated unit could not be loaded",
+                        }
+                    ),
+                ],
+            },
+            tool_context=tool_context,
+        )
+    )
+
+    assert allowed is None
+
+
+def test_workflow_guard_routes_expected_output_error_as_unsatisfied_requirement() -> None:
+    plugin = SandboxWorkflowGuardPlugin()
+    tool_context = FakeToolContext()
+    tool_context.state[ACTIVE_SANDBOX_STATE_KEY] = {
+        "audit_id": "sandbox_run_test",
+        "status": "running",
+        "mode": "workflow",
+    }
+
+    updated = asyncio.run(
+        plugin.after_tool_callback(
+            tool=SimpleNamespace(name="run_skill_script"),
+            tool_args={
+                "skill_name": "sandbox-page-analyst",
+                "file_path": "scripts/sandbox_write_file.py",
+                "args": ["--audit-id", "sandbox_run_test", "--path", "output/candidates.json"],
+            },
+            tool_context=tool_context,
+            result={
+                "status": "error",
+                "error_type": "expected_output_policy",
+                "guardrail": "expected_output_count_mismatch",
+                "audit_id": "sandbox_run_test",
+                "path": "output/candidates.json",
+                "expected_job_count": 2,
+                "actual_job_count": 1,
+                "error": "The agent declared expected_output.expected_job_count=2, but output/candidates.json contains 1 jobs.",
+            },
+        )
+    )
+
+    assert updated is not None
+    assert "unsatisfied_requirements" in updated["required_next"]
+    assert "not as a scripted tool plan" in updated["required_next"]
+    assert "inspect how expected_output was derived" in updated["required_next"]
+    assert "inspect the available tools/resources" in updated["required_next"]
+    assert "not been loaded" in updated["required_next"]
 
 
 def test_workflow_guard_clears_pending_extractor_after_successful_run() -> None:
@@ -3368,6 +4486,7 @@ def test_workflow_guard_blocks_repeated_noop_extraction_context_update() -> None
     assert second["terminal"] is False
     assert second["repeat_count"] == 2
     assert tool_context.state[ACTIVE_SANDBOX_STATE_KEY]["status"] == "running"
+    assert "look at the plan you wrote previously" in second["required_next"].lower()
     assert "sandbox remains active" in second["required_next"]
 
 
@@ -3411,6 +4530,43 @@ def test_workflow_guard_blocks_too_many_consecutive_context_updates() -> None:
     assert blocked is not None
     assert blocked["guardrail"] == "repeated_extraction_context_updates"
     assert blocked["consecutive_count"] == 2
+
+
+def test_workflow_guard_points_repeated_context_update_to_existing_plan() -> None:
+    plugin = SandboxWorkflowGuardPlugin()
+    tool_context = FakeToolContext()
+    tool_context.state[ACTIVE_SANDBOX_STATE_KEY] = {
+        "audit_id": "sandbox_run_test",
+        "status": "running",
+        "mode": "workflow",
+    }
+    planned_next_tool = {
+        "tool_name": "run_skill_script",
+        "skill_name": "sandbox-page-analyst",
+        "file_path": "scripts/sandbox_apply_patch.py",
+    }
+    tool_context.state[SESSION_EXTRACTION_CONTEXT_STATE_KEY] = {
+        "updated": True,
+        "planned_next_tool": planned_next_tool,
+    }
+    tool = SimpleNamespace(name="update_extraction_context")
+    tool_args = {
+        "audit_id": "sandbox_run_test",
+        "known_errors": ["chosen_strategy is required"],
+        "immediate_goal": "patch serializer",
+        "planned_next_tool": planned_next_tool,
+    }
+
+    first = asyncio.run(plugin.before_tool_callback(tool=tool, tool_args=tool_args, tool_context=tool_context))
+    second = asyncio.run(plugin.before_tool_callback(tool=tool, tool_args=tool_args, tool_context=tool_context))
+
+    assert first is None
+    assert second is not None
+    assert second["guardrail"] == "repeated_extraction_context_updates"
+    assert second["required_next_tool"] == planned_next_tool
+    assert "look at the plan you wrote previously" in second["required_next"].lower()
+    assert "call required_next_tool now" in second["required_next"]
+    assert "Do not call update_extraction_context again" in second["required_next"]
 
 
 def test_workflow_guard_requires_planned_next_tool_for_repair_context_update() -> None:
@@ -3471,6 +4627,42 @@ def test_workflow_guard_rejects_invalid_repair_scope_update() -> None:
 
     assert blocked is not None
     assert blocked["guardrail"] == "repair_scope_verification_required"
+
+
+def test_workflow_guard_rejects_compound_repair_scope_verification() -> None:
+    plugin = SandboxWorkflowGuardPlugin()
+    tool_context = FakeToolContext()
+    tool_context.state[ACTIVE_SANDBOX_STATE_KEY] = {
+        "audit_id": "sandbox_run_test",
+        "status": "running",
+        "mode": "workflow",
+    }
+
+    blocked = asyncio.run(
+        plugin.before_tool_callback(
+            tool=SimpleNamespace(name="update_extraction_context"),
+            tool_args={
+                "audit_id": "sandbox_run_test",
+                "repair_scope": {
+                    "status": "ready_to_verify",
+                    "objective": "verify extractor repair",
+                    "files": ["output/extractor.py"],
+                    "verification": "python output/extractor.py && python - <<'PY'\nprint('inspect')\nPY",
+                },
+                "planned_next_tool": {
+                    "tool_name": "run_skill_script",
+                    "skill_name": "sandbox-page-analyst",
+                    "file_path": "scripts/sandbox_exec.py",
+                    "args_must_include": ["python output/extractor.py"],
+                },
+            },
+            tool_context=tool_context,
+        )
+    )
+
+    assert blocked is not None
+    assert blocked["guardrail"] == "compound_repair_scope_verification_command"
+    assert "python output/extractor.py" in blocked["error"]
 
 
 def test_workflow_guard_enforces_declared_planned_next_tool() -> None:
@@ -3585,6 +4777,63 @@ def test_workflow_guard_bounds_repair_scope_resources_and_patch_targets() -> Non
     assert allowed_patch is None
     assert blocked_patch is not None
     assert blocked_patch["guardrail"] == "repair_scope_patch_target_not_allowed"
+
+
+def test_workflow_guard_allows_sandbox_read_inside_repair_scope_regardless_of_path() -> None:
+    plugin = SandboxWorkflowGuardPlugin()
+    tool_context = FakeToolContext()
+    tool_context.state[ACTIVE_SANDBOX_STATE_KEY] = {
+        "audit_id": "sandbox_run_test",
+        "status": "running",
+        "mode": "workflow",
+    }
+    tool_context.state[SESSION_EXTRACTION_CONTEXT_STATE_KEY] = {
+        "updated": True,
+        "repair_scope": {
+            "status": "patching",
+            "objective": "repair output writer",
+            "files": ["output/write_outputs.py"],
+            "allowed_inspections": ["output/candidates.json"],
+        },
+    }
+
+    allowed_output_artifact = asyncio.run(
+        plugin.before_tool_callback(
+            tool=SimpleNamespace(name="run_skill_script"),
+            tool_args={
+                "skill_name": "sandbox-page-analyst",
+                "file_path": "scripts/sandbox_read.py",
+                "args": ["--audit-id", "sandbox_run_test", "--path", "output/page_profile.json"],
+            },
+            tool_context=tool_context,
+        )
+    )
+    allowed_evidence_artifact = asyncio.run(
+        plugin.before_tool_callback(
+            tool=SimpleNamespace(name="run_skill_script"),
+            tool_args={
+                "skill_name": "sandbox-page-analyst",
+                "file_path": "scripts/sandbox_read.py",
+                "args": ["--audit-id", "sandbox_run_test", "--path", "evidence/index.json"],
+            },
+            tool_context=tool_context,
+        )
+    )
+    allowed_non_artifact_contract = asyncio.run(
+        plugin.before_tool_callback(
+            tool=SimpleNamespace(name="run_skill_script"),
+            tool_args={
+                "skill_name": "sandbox-page-analyst",
+                "file_path": "scripts/sandbox_read.py",
+                "args": ["--audit-id", "sandbox_run_test", "--path", "schemas/candidates.schema.json"],
+            },
+            tool_context=tool_context,
+        )
+    )
+
+    assert allowed_output_artifact is None
+    assert allowed_evidence_artifact is None
+    assert allowed_non_artifact_contract is None
 
 
 def test_workflow_guard_allows_apply_patch_help_inside_repair_scope() -> None:
@@ -3871,6 +5120,73 @@ def test_workflow_guard_allows_sandbox_reads_with_declared_planned_next_tool() -
     )
 
 
+def test_workflow_guard_allows_read_only_sandbox_exec_probe_with_declared_planned_next_tool() -> None:
+    plugin = SandboxWorkflowGuardPlugin()
+    tool_context = FakeToolContext()
+    tool_context.state[SESSION_EXTRACTION_CONTEXT_STATE_KEY] = {
+        "updated": True,
+        "planned_next_tool": {
+            "tool_name": "run_skill_script",
+            "skill_name": "sandbox-page-analyst",
+            "file_path": "scripts/sandbox_write_file.py",
+            "target_paths": ["output/candidates.json"],
+        },
+    }
+
+    allowed = asyncio.run(
+        plugin.before_tool_callback(
+            tool=SimpleNamespace(name="run_skill_script"),
+            tool_args={
+                "skill_name": "sandbox-page-analyst",
+                "file_path": "scripts/sandbox_exec.py",
+                "args": [
+                    "--audit-id",
+                    "sandbox_run_test",
+                    "--cmd",
+                    "python - <<'PY'\nfrom pathlib import Path\nprint(Path('page.html').read_text()[:100])\nPY",
+                ],
+            },
+            tool_context=tool_context,
+        )
+    )
+
+    assert allowed is None
+
+
+def test_workflow_guard_still_blocks_sandbox_exec_write_when_plan_declares_different_tool() -> None:
+    plugin = SandboxWorkflowGuardPlugin()
+    tool_context = FakeToolContext()
+    tool_context.state[SESSION_EXTRACTION_CONTEXT_STATE_KEY] = {
+        "updated": True,
+        "planned_next_tool": {
+            "tool_name": "run_skill_script",
+            "skill_name": "sandbox-page-analyst",
+            "file_path": "scripts/sandbox_write_file.py",
+            "target_paths": ["output/candidates.json"],
+        },
+    }
+
+    blocked = asyncio.run(
+        plugin.before_tool_callback(
+            tool=SimpleNamespace(name="run_skill_script"),
+            tool_args={
+                "skill_name": "sandbox-page-analyst",
+                "file_path": "scripts/sandbox_exec.py",
+                "args": [
+                    "--audit-id",
+                    "sandbox_run_test",
+                    "--cmd",
+                    "python - <<'PY'\nfrom pathlib import Path\nPath('output/candidates.json').write_text('{}')\nPY",
+                ],
+            },
+            tool_context=tool_context,
+        )
+    )
+
+    assert blocked is not None
+    assert blocked["guardrail"] == "next_tool_must_match_session_plan"
+
+
 def test_workflow_guard_allows_reference_reads_with_declared_planned_next_tool() -> None:
     plugin = SandboxWorkflowGuardPlugin()
     tool_context = FakeToolContext()
@@ -3924,6 +5240,32 @@ def test_workflow_guard_accepts_functions_prefix_in_planned_tool_name() -> None:
     assert allowed is None
 
 
+def test_workflow_guard_ignores_skill_name_for_direct_planned_tool() -> None:
+    plugin = SandboxWorkflowGuardPlugin()
+    tool_context = FakeToolContext()
+    tool_context.state[SESSION_EXTRACTION_CONTEXT_STATE_KEY] = {
+        "updated": True,
+        "task_understanding": "extract fixture jobs",
+        "final_goal": "validated fixture extraction",
+        "initial_plan": ["load fixed fixture into workspace"],
+        "planned_next_tool": {
+            "tool_name": "functions.load_test_fixture_page_to_workspace",
+            "skill_name": "job-listing-scout",
+            "file_path": "",
+        },
+    }
+
+    allowed = asyncio.run(
+        plugin.before_tool_callback(
+            tool=SimpleNamespace(name="load_test_fixture_page_to_workspace"),
+            tool_args={"fixture_name": "itviec_ai_engineer_ha_noi"},
+            tool_context=tool_context,
+        )
+    )
+
+    assert allowed is None
+
+
 def test_workflow_guard_blocks_repeated_identical_inspection_without_progress() -> None:
     plugin = SandboxWorkflowGuardPlugin()
     tool_context = FakeToolContext()
@@ -3951,7 +5293,8 @@ def test_workflow_guard_blocks_repeated_identical_inspection_without_progress() 
 
     assert blocked is not None
     assert blocked["guardrail"] == "same_inspection_without_progress"
-    assert "write or patch output/extractor.py" in blocked["required_next"]
+    assert "load bounded evidence" in blocked["required_next"]
+    assert "accountable protocol outputs" in blocked["required_next"]
 
 
 def test_workflow_guard_allows_same_inspection_after_progress_action() -> None:
@@ -4425,7 +5768,7 @@ def test_workflow_guard_injects_runtime_instruction_for_unfinalized_sandbox() ->
     assert guard_text.startswith("<RUNTIME_SANDBOX_GUARD>")
     assert guard_text.endswith("</RUNTIME_SANDBOX_GUARD>")
     assert "priority: hard operational constraint." in guard_text
-    assert "write or repair extractor/protocol files" in guard_text
+    assert "write or repair accountable protocol files or supporting scripts" in guard_text
     assert "Do not produce a final text response" in guard_text
     assert "runtime will block premature text" not in guard_text
 
@@ -4519,7 +5862,8 @@ def test_workflow_guard_blocks_repeated_same_file_reads_during_repair() -> None:
     assert second is None
     assert third is not None
     assert third["error_type"] == "repeated_sandbox_read_policy"
-    assert "patch output/extractor.py" in third["required_next"]
+    assert "patch the relevant helper" in third["required_next"]
+    assert "accountable protocol output" in third["required_next"]
 
 
 def test_workflow_guard_ignores_diagnostic_sandbox_for_runtime_instruction() -> None:

@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["observations", "chosen_strategy", "expected_output"],
+  "properties": {
+    "page": {"type": "object"},
+    "loaded_resources": {"type": "array"},
+    "observations": {"type": "array", "minItems": 1},
+    "chosen_strategy": {"type": "string", "minLength": 1},
+    "extraction_steps": {"type": "array"},
+    "expected_output": {
+      "type": "object",
+      "required": ["expected_job_count", "count_basis", "count_rationale", "available_fields", "field_basis"],
+      "properties": {
+        "expected_job_count": {"type": ["integer", "string"]},
+        "count_basis": {"type": "string", "minLength": 1},
+        "count_rationale": {"type": "string", "minLength": 1},
+        "available_fields": {"type": "object", "minProperties": 1},
+        "field_basis": {"type": "object"}
+      }
+    },
+    "validation": {"type": "object"},
+    "layout_drift_observed": {"type": "boolean"},
+    "reference_update_needed": {"type": "boolean"},
+    "skill_update_needed": {"type": "boolean"}
+  }
+}

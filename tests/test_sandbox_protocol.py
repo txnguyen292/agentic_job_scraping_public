@@ -16,6 +16,7 @@ SKILL_DIR = Path("skills/sandbox-page-analyst")
 def test_sandbox_page_analyst_skill_bundle_exists() -> None:
     expected_files = [
         "SKILL.md",
+        "scripts/protocol_contract.py",
         "scripts/validate_outputs.py",
         "scripts/sandbox_litellm_call.py",
         "scripts/sandbox_apply_patch.py",
@@ -35,6 +36,8 @@ def test_sandbox_page_analyst_skill_bundle_exists() -> None:
         "schemas/extraction_strategy.schema.json",
         "schemas/candidates.schema.json",
         "schemas/validation.schema.json",
+        "schemas/extraction_run.schema.json",
+        "schemas/script_manifest.schema.json",
         "schemas/reference_proposal.schema.json",
         "schemas/skill_patch.schema.json",
     ]
@@ -44,7 +47,7 @@ def test_sandbox_page_analyst_skill_bundle_exists() -> None:
     assert not (SKILL_DIR / "protocol.md").exists()
 
 
-def test_sandbox_page_analyst_skill_requires_code_first_extraction_workflow() -> None:
+def test_sandbox_page_analyst_skill_requires_evidence_cited_agent_extraction_workflow() -> None:
     skill_text = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
     diagnostic_text = (SKILL_DIR / "references" / "diagnostic-mode.md").read_text(encoding="utf-8")
     workflow_text = (SKILL_DIR / "references" / "workflow-mode.md").read_text(encoding="utf-8")
@@ -57,7 +60,12 @@ def test_sandbox_page_analyst_skill_requires_code_first_extraction_workflow() ->
     assert "references/diagnostic-mode.md" in skill_text
     assert "references/workflow-mode.md" in skill_text
     assert "Do not upgrade a diagnostic request into workflow mode" in skill_text
+    assert "`loaded_resources`" in skill_text
+    assert "the workflow reference and any site-specific reference just loaded" in skill_text
+    assert "the next concrete action that carries out the loaded instructions" in skill_text
     assert "Script Catalog" in skill_text
+    assert "scripts/protocol_contract.py" in skill_text
+    assert "`output_contract` and the agent's own `producer_output_plan`" in skill_text
     assert "Do not load a separate catalog or script manual file" in skill_text
     assert "Use each script's `--help` output when exact arguments are needed" in skill_text
     assert "scripts/sandbox_apply_patch.py" in skill_text
@@ -65,25 +73,41 @@ def test_sandbox_page_analyst_skill_requires_code_first_extraction_workflow() ->
     assert 'Pass commands with `--cmd "<shell command>"`' in skill_text
     assert "do not use pass-through args after `--`" in skill_text
     assert "Use `--max-chars`, not `--max-bytes`" in skill_text
-    assert "Extractor invariant" in skill_text
+    assert "Accountable extraction invariant" in skill_text
+    assert "the agent chooses the extraction method" in skill_text
+    assert "scripts may inspect, parse, extract, validate, serialize" in skill_text
+    assert "evidence/index.json" in skill_text
+    assert "evidence/chunks/*" in skill_text
+    assert "`field_rationale` with `evidence_refs`" in skill_text
     assert "Workflow Protocol Contract" in skill_text
     assert "output/page_profile.json" in skill_text
     assert "output/extraction_strategy.json" in skill_text
+    assert "output/extraction_run.json" in skill_text
     assert "output/candidates.json" in skill_text
     assert "output/validation.json" in skill_text
     assert "output/final.json" in skill_text
+    assert "output/run_summary.md" in skill_text
+    assert "output/script_manifest.json" in skill_text
     assert "Do not treat `output/page_profile.json`, `output/extraction_strategy.json`, or `output/validation.json` as cleanup after persistence fails" in skill_text
     assert "workspace-relative paths only" in skill_text
-    assert "Use `output/extractor.py`, not `/workspace/output/extractor.py`" in skill_text
+    assert "not `/workspace/...`" in skill_text
     assert "Never create placeholder required protocol outputs" in skill_text
     assert "do not write `{\"jobs\": [], \"count\": 20}`" in skill_text
+    assert "the number of extracted job postings must match the agent's recorded observations" in skill_text
+    assert "a mismatch is a repair target or `needs_review`, not `success`" in skill_text
     assert "`output/candidates.json` must use the candidate payload shape" in skill_text
     assert "Do not wrap candidates as" in skill_text
     assert "`output/candidates.json` must have top-level `source`, `jobs`, `selectors`, `crawl`, and `warnings`" in workflow_text
-    assert "Protocol files must be written by `output/extractor.py`" in workflow_text
+    assert "The agent is responsible for the extraction outcome" in workflow_text
+    assert "After loading this workflow reference or any site-specific resource" in workflow_text
+    assert "Record the loaded resource names" in workflow_text
+    assert "a concrete `immediate_goal` plus `planned_next_tool`" in workflow_text
+    assert "Scripts may assist or perform extraction" in workflow_text
+    assert "Do not ingest unbounded evidence" in workflow_text
+    assert "Mark a chunk `loaded: true` only after the agent has ingested that exact chunk" in workflow_text
     assert "`output/final.json` must use the sandbox result envelope" in skill_text
     assert "top-level `status` plus a `result` object" in skill_text
-    assert "derive extraction patterns" in workflow_text
+    assert "derive repeated evidence patterns" in workflow_text
     assert "Session Extraction Notebook" in workflow_text
     assert "Runtime Context Priority" in workflow_text
     assert "update_extraction_context" in workflow_text
@@ -95,55 +119,68 @@ def test_sandbox_page_analyst_skill_requires_code_first_extraction_workflow() ->
     assert "Before every tool call and final response" in workflow_text
     assert "`attempted_actions`" in workflow_text
     assert "do not repeat those checks" in workflow_text
-    assert "writing or replacing `output/extractor.py`" in workflow_text
+    assert "normally loading needed evidence, running or patching the chosen script, serializing outputs, validating, or finalizing" in workflow_text
     assert "refer to the latest injected session state for next-step guidance" in workflow_text
+    assert 'Treat `status: "success"` from a non-context tool as verified completion' in workflow_text
+    assert "advance to the next missing required output or validation" in workflow_text
+    assert "`workflow_reflections`" in workflow_text
+    assert "learned interpretations of failure patterns" in workflow_text
+    assert "do not treat them as fixed tool recipes" in workflow_text
     assert "`observations`" in workflow_text
     assert "`extraction_plan`" in workflow_text
     assert "Observations must include implementation cues" in workflow_text
     assert "selector, attribute names, text boundaries, URL fallback order" in workflow_text
     assert "Example session context update after detecting ITviec cards" in workflow_text
     assert 'Detected 20 repeated job cards with selector [data-search--pagination-target=\\"jobCard\\"]' in workflow_text
-    assert 'Iterate soup.select(\'[data-search--pagination-target=\\"jobCard\\"]\')' in workflow_text
-    assert "fallback to parsing the job query value from /sign_in?job=" in workflow_text
+    assert "one exact evidence chunk per soup.select" in workflow_text
+    assert "/sign_in?job= fallback" in workflow_text
     assert "compare `output/candidates.json` and `output/final.json` against the requirement" in workflow_text
     assert "Reconcile the new result with the injected session extraction context" in workflow_text
     assert "If the new result contradicts the notes" in workflow_text
     assert "update the observations or extraction plan" in workflow_text
-    assert "derive recurring job-post patterns" in workflow_text
-    assert "reusable extractor code" in workflow_text
-    assert "Write reusable extractor code, implemented as Python" in workflow_text
-    assert "applies the recurring job-post patterns efficiently" in workflow_text
-    assert "A valid workflow run must plan for all required protocol outputs before the first extractor run" in workflow_text
-    assert "produce them before validation, finalization, persistence, or database queries" in workflow_text
+    assert "derive repeated evidence patterns" in workflow_text
+    assert "slice exact evidence" in workflow_text
+    assert "budget tokens" in workflow_text
+    assert "parse/extract repeated records" in workflow_text
+    assert "A valid workflow run must plan for all required protocol outputs before validation" in workflow_text
+    assert "load the compact protocol contract with `scripts/protocol_contract.py`" in workflow_text
+    assert "`producer_output_plan`" in workflow_text
+    assert "This should prevent learning the output contract one validator error at a time" in workflow_text
+    assert "before validation, finalization, persistence, or database queries" in workflow_text
     assert "Do not wait for `persist_sandbox_job_extraction` to reveal missing protocol files" in workflow_text
     assert "Use workspace-relative paths with `scripts/sandbox_write_file.py`" in workflow_text
     assert "Host-side helper scripts use workspace-relative paths" in workflow_text
     assert "Never use host temp paths" in workflow_text
     assert "treat it as host-side audit metadata" in workflow_text
-    assert "never `/workspace/output/extractor.py`" in workflow_text
-    assert "Do not overwrite extractor-produced outputs with placeholders" in workflow_text
-    assert "repair the extractor or rerun it" in workflow_text
+    assert "never `/workspace/...`" in workflow_text
+    assert "Do not overwrite outputs with placeholders" in workflow_text
+
+
+    assert "repair the observations/evidence, extraction method, script, rationale, or serialization" in workflow_text
     assert "If `final.json` schema or count validation fails" in workflow_text
     assert "load `sandbox-extraction-debugger`" in workflow_text
     assert "usage-vs-implementation triage" in workflow_text
     assert "sandbox-artifact-only repair" in workflow_text
     assert "instead of duplicating debugging policy here" in workflow_text
     assert "do not manually assemble a partial `final.json`" in workflow_text
-    assert "regenerate `candidates.json` and `final.json` from the same full payload" in workflow_text
+    assert "regenerate `candidates.json` and `final.json` from the same complete payload" in workflow_text
     assert "Do not repair `final.json` by writing one sampled job" in workflow_text
     assert "`{\"result\":\"success\"}`" in workflow_text
-    assert "output/extractor.py" in workflow_text
-    assert "Do not hand-write job records" in workflow_text
-    assert "Treat extraction as pattern discovery plus code generation" in workflow_text
-    assert "extractor's persisted output files are the source of truth" in workflow_text
+    assert "evidence/chunks/" in workflow_text
+    assert "The agent is responsible for the extraction outcome" in workflow_text
+    assert "Treat scripts as auditable supporting artifacts" in workflow_text
+    assert "The persisted output files are the source of truth" in workflow_text
     assert "saved output paths" in workflow_text
     assert "`candidates_path` and `final_path`" in workflow_text
-    assert "Extractor stdout is only a compact run summary" in protocol_text
-    assert "Do not use extractor stdout as the source of truth" in protocol_text
+    assert "Helper stdout is only a compact run summary" in protocol_text
+    assert "Do not use helper stdout as the source of truth" in protocol_text
+    assert "Accountable Agent Contract" in protocol_text
+    assert "`output/extraction_run.json` must record at least" in protocol_text
     assert "Candidate payload shape" in protocol_text
     assert "Final result shape" in protocol_text
-    assert "If the extractor emits 20 valid candidates" in workflow_text
+    assert "If the agent extracts 20 valid candidates" in workflow_text
     assert "output/reference_proposal.md" in workflow_text
+    assert "output/run_summary.md" in workflow_text
     assert "reference proposal" in protocol_text
     assert "Approved Runtime Packages" in skill_text
     assert "Do not run `pip install`" in skill_text
@@ -152,7 +189,7 @@ def test_sandbox_page_analyst_skill_requires_code_first_extraction_workflow() ->
     assert "classify the mounted page" in skill_text
     assert "`itviec-listing`" in skill_text
     assert "load `references/itviec-listing-page.md`" in skill_text
-    assert "do not write `output/page_profile.json`, `output/extraction_strategy.json`, `output/extractor.py`, or any final payload from only `fetch_page_to_workspace` signals" in skill_text
+    assert "do not write `output/page_profile.json`, `output/extraction_strategy.json`, helper scripts, or any final payload from only `fetch_page_to_workspace` signals" in skill_text
     assert "First run a bounded sandbox probe with `sandbox_exec.py --cmd`" in skill_text
     assert "should not become a one-job selected-detail extraction" in skill_text
     assert "from the `sandbox-page-analyst` skill" in skill_text
@@ -169,12 +206,47 @@ def test_sandbox_page_analyst_skill_requires_code_first_extraction_workflow() ->
     assert "Never replace the preview with only a file path" in diagnostic_text
 
 
+def test_protocol_contract_script_exposes_validator_required_fields() -> None:
+    completed = subprocess.run(
+        [sys.executable, str(SKILL_DIR / "scripts" / "protocol_contract.py")],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    payload = json.loads(completed.stdout)
+
+    assert payload["status"] == "success"
+    assert payload["contract_version"] == "sandbox-page-analyst-protocol-v1"
+    assert payload["extraction_run_json"]["required"] == [
+        "observations",
+        "chosen_strategy",
+        "expected_output",
+    ]
+    assert payload["extraction_run_json"]["expected_output"]["required"] == [
+        "expected_job_count",
+        "count_basis",
+        "count_rationale",
+        "available_fields",
+        "field_basis",
+    ]
+    assert payload["script_manifest_json"]["scripts_entry_requires_one_of"] == [
+        "workflow_version",
+        "reference_version",
+    ]
+    assert payload["script_manifest_json"]["scripts_entry_requires_reuse_classification"] == [
+        "reuse",
+        "reuse_classification",
+    ]
+    assert "crawl" in payload["candidates_json"]["required_top_level"]
+
+
 def test_itviec_reference_prevents_job_selected_zero_job_regression() -> None:
     workflow_text = (SKILL_DIR / "references" / "workflow-mode.md").read_text(encoding="utf-8")
     itviec_text = (SKILL_DIR / "references" / "itviec-listing-page.md").read_text(encoding="utf-8")
 
     assert "If the source URL is on `itviec.com`" in workflow_text
-    assert "load `references/itviec-listing-page.md` before writing extractor code" in workflow_text
+    assert "load `references/itviec-listing-page.md` before writing helper scripts or protocol outputs" in workflow_text
     assert "job URLs must be detail posting URLs ending in `-NNNN`" in workflow_text
     assert "repeated job-card markers" in workflow_text
     assert "Do not classify a listing page as having \"no stable evidence\"" in workflow_text
@@ -188,12 +260,12 @@ def test_itviec_reference_prevents_job_selected_zero_job_regression() -> None:
     assert "never leave `title` null" in itviec_text
     assert "`validation.json` must not say `valid: true`" in itviec_text
     assert "never use `job_selected` as an exclusion filter" in itviec_text
-    assert "the extractor emits zero jobs, repair the extractor" in itviec_text
+    assert "the output emits zero jobs, repair evidence loading, output/run record, or serialization" in itviec_text
     assert "primary extraction loop must be one emitted job per repeated card-like unit" in itviec_text
     assert "global matches are fallback/supporting evidence" in itviec_text
     assert "Do not start from all `/it-jobs/` anchors" in itviec_text
     assert "Do not accept `candidate_count: 1`" in itviec_text
-    assert "Repair the card loop" in itviec_text
+    assert "Repair the card evidence loop" in itviec_text
 
 
 def test_itviec_reference_requires_card_first_extraction_not_global_link_heuristics() -> None:
@@ -205,17 +277,18 @@ def test_itviec_reference_requires_card_first_extraction_not_global_link_heurist
 
     assert "one emitted job per repeated listing card" in workflow_text
     assert "broad `/it-jobs/` URL scans are supporting evidence only" in workflow_text
-    assert "if observations record 20 repeated listing cards and the extractor emits 1, 5, 64, 114" in workflow_text
+    assert "if observations record 20 repeated listing cards and the output emits 1, 5, 64, 114" in workflow_text
     assert "If the declared `planned_next_tool` runs and fails" in workflow_text
+    assert 'If the planned repair tool returns `status: "success"`' in debugger_text
     assert "finalize count mismatch is not a final-answer condition" in workflow_text
     assert "Keep this skill generic" in debugger_text
     assert "references/itviec-listing-repair.md" in debugger_text
     assert "extractor starts from global `/it-jobs/` URL matches" not in debugger_text
     assert "ITviec Listing Repair" in debugger_reference_text
     assert "global `/it-jobs/` URL matches" in debugger_reference_text
-    assert "Make at least one distinct producer-logic repair" in debugger_reference_text
+    assert "Make at least one distinct evidence/output/helper repair" in debugger_reference_text
     assert "ITviec listing evidence expects N jobs but candidates.jobs has M" in debugger_reference_text
-    assert "focused test/probe: assert extractor emits one record per repeated card" in debugger_reference_text
+    assert "focused test/probe: assert evidence/output emits one record per repeated card" in debugger_reference_text
     assert "disallowed fix: edit scripts/validate_outputs.py" in debugger_reference_text
     assert "If the planned tool runs and fails" in debugger_text
     assert "inspect that error-producing helper as a read-only contract" in debugger_text
@@ -229,6 +302,8 @@ def test_workflow_state_is_compact_operational_memory() -> None:
     assert "Session state is the most important working document" in workflow_text
     assert "concise enough to fit inside one model call" in workflow_text
     assert "detailed enough that a future turn can derive the next efficient action" in workflow_text
+    assert "`sandbox_read.py` is a bounded read-only tool" in workflow_text
+    assert "Keep mutations bounded" in workflow_text
     assert "Keep state compact and operational" in workflow_text
     assert "do not store raw HTML" in workflow_text
     assert "record the rationale in state before taking that step" in workflow_text
@@ -243,8 +318,8 @@ def test_workflow_requires_validator_owned_quality_judgement() -> None:
     itviec_text = (SKILL_DIR / "references" / "itviec-listing-page.md").read_text(encoding="utf-8")
 
     assert "Validator-Owned Quality Gate" in skill_text
-    assert "Do not rewrite `output/extractor.py` merely because a count feels broad or narrow" in skill_text
-    assert "Run `scripts/validate_outputs.py` after the extractor has produced the required protocol files" in workflow_text
+    assert "Do not rewrite supporting scripts merely because a count feels broad or narrow" in skill_text
+    assert "Run `scripts/validate_outputs.py` after the accountable outputs exist" in workflow_text
     assert "treat that script as the read-only contract that produced the error" in workflow_text
     assert "inspect its `--help`" in workflow_text
     assert "Do not judge that a count is \"too broad\" or \"too narrow\" from intuition alone" in workflow_text
@@ -281,6 +356,7 @@ def test_project_sandbox_image_assets_define_allowlisted_parsers() -> None:
 def test_validate_outputs_helper_accepts_complete_protocol_outputs(tmp_path: Path) -> None:
     output_dir = tmp_path / "output"
     output_dir.mkdir()
+    _write_accountability_artifacts(output_dir)
     _write_json(
         output_dir / "page_profile.json",
         {
@@ -358,6 +434,281 @@ def test_validate_outputs_helper_accepts_complete_protocol_outputs(tmp_path: Pat
     assert payload["final"]["path"] == "output/final.json"
 
 
+def test_validate_outputs_helper_requires_script_manifest_for_authored_scripts(tmp_path: Path) -> None:
+    output_dir = tmp_path / "output"
+    scratch_dir = tmp_path / "scratch"
+    output_dir.mkdir()
+    scratch_dir.mkdir()
+    _write_minimal_valid_protocol(output_dir)
+    (scratch_dir / "extract_jobs.py").write_text("print('extract')\n", encoding="utf-8")
+
+    completed = subprocess.run(
+        [sys.executable, str(SKILL_DIR / "scripts" / "validate_outputs.py"), str(output_dir)],
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 1
+    assert "output/script_manifest.json is required when the agent writes supporting scripts" in completed.stderr
+
+
+def test_validate_outputs_helper_rejects_script_manifest_hash_mismatch(tmp_path: Path) -> None:
+    output_dir = tmp_path / "output"
+    scratch_dir = tmp_path / "scratch"
+    output_dir.mkdir()
+    scratch_dir.mkdir()
+    _write_minimal_valid_protocol(output_dir)
+    (scratch_dir / "extract_jobs.py").write_text("print('extract')\n", encoding="utf-8")
+    _write_json(
+        output_dir / "script_manifest.json",
+        {
+            "scripts": [
+                {
+                    "path": "scratch/extract_jobs.py",
+                    "purpose": "Extract repeated test jobs.",
+                    "inputs": ["page.html"],
+                    "outputs": ["output/candidates.json"],
+                    "sha256": "not-the-real-hash",
+                    "workflow_version": "workflow-mode.md@accountable",
+                    "reuse": "run_specific",
+                    "validation_result": {"valid": True},
+                }
+            ]
+        },
+    )
+
+    completed = subprocess.run(
+        [sys.executable, str(SKILL_DIR / "scripts" / "validate_outputs.py"), str(output_dir)],
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 1
+    assert "sha256 does not match file content" in completed.stderr
+
+
+def test_validate_outputs_helper_requires_reference_proposal_for_recorded_layout_drift(tmp_path: Path) -> None:
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    _write_minimal_valid_protocol(output_dir)
+    extraction_run = json.loads((output_dir / "extraction_run.json").read_text(encoding="utf-8"))
+    extraction_run["layout_drift_observed"] = True
+    _write_json(output_dir / "extraction_run.json", extraction_run)
+
+    completed = subprocess.run(
+        [sys.executable, str(SKILL_DIR / "scripts" / "validate_outputs.py"), str(output_dir)],
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 1
+    assert "layout/reference drift was recorded" in completed.stderr
+
+
+def test_validate_outputs_helper_accepts_loaded_evidence_cited_outputs(tmp_path: Path) -> None:
+    output_dir = tmp_path / "output"
+    evidence_dir = tmp_path / "evidence"
+    chunks_dir = evidence_dir / "chunks"
+    output_dir.mkdir()
+    chunks_dir.mkdir(parents=True)
+    _write_accountability_artifacts(output_dir)
+    (chunks_dir / "card_001.txt").write_text(
+        '<article class="job"><h2>Machine Learning Engineer</h2><span>Example AI</span></article>',
+        encoding="utf-8",
+    )
+    _write_json(
+        evidence_dir / "index.json",
+        {
+            "chunks": [
+                {
+                    "chunk_id": "card_001",
+                    "path": "evidence/chunks/card_001.txt",
+                    "source_path": "page.html",
+                    "char_count": 85,
+                    "token_estimate": 24,
+                    "loaded": True,
+                }
+            ]
+        },
+    )
+    job = {
+        "title": "Machine Learning Engineer",
+        "company_name": "Example AI",
+        "job_url": "https://example.com/jobs/ml",
+        "field_rationale": {
+            "title": {
+                "value": "Machine Learning Engineer",
+                "evidence_refs": ["card_001"],
+                "rationale": "The loaded card chunk contains the title inside the heading.",
+            },
+            "company_name": {
+                "value": "Example AI",
+                "evidence_refs": ["card_001"],
+                "rationale": "The company text appears next to the title in the same loaded card.",
+            },
+            "job_url": {
+                "value": "https://example.com/jobs/ml",
+                "evidence_refs": ["card_001"],
+                "rationale": "The URL was resolved from the loaded card anchor.",
+            },
+        },
+        "evidence": [{"ref": "card_001"}],
+    }
+    _write_json(output_dir / "page_profile.json", {"page_files": ["page.html"]})
+    _write_json(output_dir / "extraction_strategy.json", {"strategy": "agent-evidence-cited"})
+    _write_json(output_dir / "candidates.json", {"jobs": [job], "crawl": {"candidate_count": 1}})
+    _write_json(output_dir / "validation.json", {"valid": True, "candidate_count": 1})
+    _write_json(
+        output_dir / "final.json",
+        {
+            "status": "success",
+            "output_schema": "job_extraction",
+            "result": {"jobs": [job], "crawl": {"candidate_count": 1}},
+        },
+    )
+
+    completed = subprocess.run(
+        [sys.executable, str(SKILL_DIR / "scripts" / "validate_outputs.py"), str(output_dir)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    payload = json.loads(completed.stdout)
+
+    assert payload["valid"] is True
+    assert payload["evidence_index"]["path"] == "evidence/index.json"
+
+
+def test_validate_outputs_helper_rejects_missing_field_rationale_when_evidence_index_exists(tmp_path: Path) -> None:
+    output_dir = tmp_path / "output"
+    evidence_dir = tmp_path / "evidence"
+    chunks_dir = evidence_dir / "chunks"
+    output_dir.mkdir()
+    chunks_dir.mkdir(parents=True)
+    _write_accountability_artifacts(output_dir)
+    (chunks_dir / "card_001.txt").write_text("Machine Learning Engineer at Example AI", encoding="utf-8")
+    _write_json(
+        evidence_dir / "index.json",
+        {
+            "chunks": [
+                {
+                    "chunk_id": "card_001",
+                    "path": "evidence/chunks/card_001.txt",
+                    "token_estimate": 10,
+                    "loaded": True,
+                }
+            ]
+        },
+    )
+    job = {
+        "title": "Machine Learning Engineer",
+        "company_name": "Example AI",
+        "job_url": "https://example.com/jobs/ml",
+        "field_rationale": {
+            "title": {"evidence_refs": ["card_001"], "rationale": "Loaded heading text."},
+            "job_url": {"evidence_refs": ["card_001"], "rationale": "Loaded anchor URL."},
+        },
+    }
+    _write_json(output_dir / "page_profile.json", {"page_files": ["page.html"]})
+    _write_json(output_dir / "extraction_strategy.json", {"strategy": "agent-evidence-cited"})
+    _write_json(output_dir / "candidates.json", {"jobs": [job], "crawl": {"candidate_count": 1}})
+    _write_json(output_dir / "validation.json", {"valid": True, "candidate_count": 1})
+    _write_json(
+        output_dir / "final.json",
+        {"status": "success", "output_schema": "job_extraction", "result": {"jobs": [job]}},
+    )
+
+    completed = subprocess.run(
+        [sys.executable, str(SKILL_DIR / "scripts" / "validate_outputs.py"), str(output_dir)],
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 1
+    assert "job 0 field company_name missing field_rationale" in completed.stderr
+
+
+def test_validate_outputs_helper_rejects_cited_refs_without_evidence_index(tmp_path: Path) -> None:
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    _write_accountability_artifacts(output_dir, expected_count=20)
+    _write_accountability_artifacts(output_dir)
+    job = {
+        "title": "Machine Learning Engineer",
+        "job_url": "https://example.com/jobs/ml",
+        "field_rationale": {
+            "title": {"evidence_refs": ["card_001"], "rationale": "Loaded heading text."},
+            "job_url": {"evidence_refs": ["card_001"], "rationale": "Loaded anchor URL."},
+        },
+        "evidence": [{"ref": "card_001"}],
+    }
+    _write_json(output_dir / "page_profile.json", {"page_files": ["page.html"]})
+    _write_json(output_dir / "extraction_strategy.json", {"strategy": "agent-evidence-cited"})
+    _write_json(output_dir / "candidates.json", {"jobs": [job], "crawl": {"candidate_count": 1}})
+    _write_json(output_dir / "validation.json", {"valid": True, "candidate_count": 1})
+    _write_json(
+        output_dir / "final.json",
+        {"status": "success", "output_schema": "job_extraction", "result": {"jobs": [job]}},
+    )
+
+    completed = subprocess.run(
+        [sys.executable, str(SKILL_DIR / "scripts" / "validate_outputs.py"), str(output_dir)],
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 1
+    assert "evidence/index.json is required when jobs cite evidence refs" in completed.stderr
+
+
+def test_validate_outputs_helper_rejects_unloaded_evidence_refs(tmp_path: Path) -> None:
+    output_dir = tmp_path / "output"
+    evidence_dir = tmp_path / "evidence"
+    chunks_dir = evidence_dir / "chunks"
+    output_dir.mkdir()
+    chunks_dir.mkdir(parents=True)
+    _write_accountability_artifacts(output_dir)
+    (chunks_dir / "card_001.txt").write_text("Machine Learning Engineer at Example AI", encoding="utf-8")
+    _write_json(
+        evidence_dir / "index.json",
+        {
+            "chunks": [
+                {
+                    "chunk_id": "card_001",
+                    "path": "evidence/chunks/card_001.txt",
+                    "token_estimate": 10,
+                    "loaded": False,
+                }
+            ]
+        },
+    )
+    job = {
+        "title": "Machine Learning Engineer",
+        "job_url": "https://example.com/jobs/ml",
+        "field_rationale": {
+            "title": {"evidence_refs": ["card_001"], "rationale": "Loaded heading text."},
+            "job_url": {"evidence_refs": ["card_001"], "rationale": "Loaded anchor URL."},
+        },
+    }
+    _write_json(output_dir / "page_profile.json", {"page_files": ["page.html"]})
+    _write_json(output_dir / "extraction_strategy.json", {"strategy": "agent-evidence-cited"})
+    _write_json(output_dir / "candidates.json", {"jobs": [job], "crawl": {"candidate_count": 1}})
+    _write_json(output_dir / "validation.json", {"valid": True, "candidate_count": 1})
+    _write_json(
+        output_dir / "final.json",
+        {"status": "success", "output_schema": "job_extraction", "result": {"jobs": [job]}},
+    )
+
+    completed = subprocess.run(
+        [sys.executable, str(SKILL_DIR / "scripts" / "validate_outputs.py"), str(output_dir)],
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 1
+    assert "evidence ref card_001 was not loaded before extraction" in completed.stderr
+
+
 def test_validate_outputs_helper_reports_all_missing_protocol_outputs(tmp_path: Path) -> None:
     output_dir = tmp_path / "output"
     output_dir.mkdir()
@@ -381,13 +732,16 @@ def test_validate_outputs_helper_reports_all_missing_protocol_outputs(tmp_path: 
     assert payload["valid"] is False
     assert "page_profile.json" in payload["error"]
     assert "extraction_strategy.json" in payload["error"]
+    assert "extraction_run.json" in payload["error"]
     assert "validation.json" in payload["error"]
     assert "final.json" in payload["error"]
+    assert "run_summary.md" in payload["error"]
 
 
 def test_validate_outputs_helper_rejects_invalid_final_shape(tmp_path: Path) -> None:
     output_dir = tmp_path / "output"
     output_dir.mkdir()
+    _write_accountability_artifacts(output_dir)
     _write_json(output_dir / "page_profile.json", {"page_files": ["page.html"]})
     _write_json(output_dir / "extraction_strategy.json", {"strategy": "static-html-cards"})
     _write_json(
@@ -413,6 +767,7 @@ def test_validate_outputs_helper_rejects_invalid_final_shape(tmp_path: Path) -> 
 def test_validate_outputs_helper_rejects_candidates_final_envelope_shape(tmp_path: Path) -> None:
     output_dir = tmp_path / "output"
     output_dir.mkdir()
+    _write_accountability_artifacts(output_dir)
     _write_json(output_dir / "page_profile.json", {"page_files": ["page.html"]})
     _write_json(output_dir / "extraction_strategy.json", {"strategy": "static-html-cards"})
     _write_json(
@@ -451,6 +806,7 @@ def test_validate_outputs_helper_rejects_candidates_final_envelope_shape(tmp_pat
 def test_validate_outputs_helper_rejects_null_string_fields(tmp_path: Path) -> None:
     output_dir = tmp_path / "output"
     output_dir.mkdir()
+    _write_accountability_artifacts(output_dir)
     _write_json(output_dir / "page_profile.json", {"page_files": ["page.html"]})
     _write_json(output_dir / "extraction_strategy.json", {"strategy": "static-html-cards"})
     _write_json(
@@ -494,9 +850,38 @@ def test_validate_outputs_helper_rejects_null_string_fields(tmp_path: Path) -> N
     assert "company_name must be a string" in completed.stderr
 
 
+def test_validate_outputs_helper_rejects_placeholder_for_required_observed_field(tmp_path: Path) -> None:
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    _write_minimal_valid_protocol(output_dir)
+    extraction_run = json.loads((output_dir / "extraction_run.json").read_text(encoding="utf-8"))
+    extraction_run["expected_output"]["available_fields"]["company_name"] = "required_observed"
+    extraction_run["expected_output"]["field_basis"]["company_name"] = (
+        "The repeated card text exposes a company label for every in-scope job."
+    )
+    _write_json(output_dir / "extraction_run.json", extraction_run)
+
+    candidates = json.loads((output_dir / "candidates.json").read_text(encoding="utf-8"))
+    candidates["jobs"][0]["company_name"] = "unknown"
+    _write_json(output_dir / "candidates.json", candidates)
+    final = json.loads((output_dir / "final.json").read_text(encoding="utf-8"))
+    final["result"] = candidates
+    _write_json(output_dir / "final.json", final)
+
+    completed = subprocess.run(
+        [sys.executable, str(SKILL_DIR / "scripts" / "validate_outputs.py"), str(output_dir)],
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 1
+    assert "field company_name is required by extraction_run.json expected_output.available_fields" in completed.stderr
+
+
 def test_validate_outputs_helper_rejects_itviec_navigation_links(tmp_path: Path) -> None:
     output_dir = tmp_path / "output"
     output_dir.mkdir()
+    _write_accountability_artifacts(output_dir, expected_count=6)
     _write_json(output_dir / "page_profile.json", {"page_files": ["page.html"]})
     _write_json(output_dir / "extraction_strategy.json", {"strategy": "itviec-listing-page"})
     _write_json(
@@ -543,6 +928,7 @@ def test_validate_outputs_helper_rejects_itviec_navigation_links(tmp_path: Path)
 def test_validate_outputs_helper_rejects_single_job_success_when_itviec_listing_has_many_posts(tmp_path: Path) -> None:
     output_dir = tmp_path / "output"
     output_dir.mkdir()
+    _write_accountability_artifacts(output_dir, expected_count=20)
     (tmp_path / "page.html").write_text(
         "\n".join(
             f'<a href="/it-jobs/ai-engineer-example-company-{index:04d}">Job {index}</a>'
@@ -589,6 +975,7 @@ def test_validate_outputs_helper_rejects_single_job_success_when_itviec_listing_
 def test_validate_outputs_helper_rejects_itviec_count_over_extraction(tmp_path: Path) -> None:
     output_dir = tmp_path / "output"
     output_dir.mkdir()
+    _write_accountability_artifacts(output_dir, expected_count=20)
     (tmp_path / "page.html").write_text(
         "\n".join(
             f'<article data-search--pagination-target="jobCard"><a href="/it-jobs/ai-engineer-example-company-{index:04d}">Job {index}</a></article>'
@@ -648,6 +1035,7 @@ def test_validate_outputs_helper_accepts_verified_itviec_fixture(tmp_path: Path)
     expected = json.loads(Path("tests/fixtures/itviec_ai_engineer_ha_noi.expected.json").read_text(encoding="utf-8"))
     output_dir = tmp_path / "output"
     output_dir.mkdir()
+    _write_accountability_artifacts(output_dir, expected_count=20)
     (tmp_path / "page.html").write_text(
         Path("tests/fixtures/itviec_ai_engineer_ha_noi.html").read_text(encoding="utf-8"),
         encoding="utf-8",
@@ -691,6 +1079,7 @@ def test_validate_outputs_helper_rejects_itviec_output_that_differs_from_verifie
     actual["crawl"] = {"discovered_count": 21, "candidate_count": 21, "relevant_count": 21, "blocked": False, "blocker": ""}
     output_dir = tmp_path / "output"
     output_dir.mkdir()
+    _write_accountability_artifacts(output_dir, expected_count=20)
     (tmp_path / "page.html").write_text(
         Path("tests/fixtures/itviec_ai_engineer_ha_noi.html").read_text(encoding="utf-8"),
         encoding="utf-8",
@@ -725,6 +1114,7 @@ def test_validate_outputs_helper_rejects_itviec_same_count_output_that_differs_f
     actual["jobs"][0]["company_name"] = "Wrong Company"
     output_dir = tmp_path / "output"
     output_dir.mkdir()
+    _write_accountability_artifacts(output_dir, expected_count=20)
     (tmp_path / "page.html").write_text(
         Path("tests/fixtures/itviec_ai_engineer_ha_noi.html").read_text(encoding="utf-8"),
         encoding="utf-8",
@@ -1255,3 +1645,64 @@ def test_sandbox_write_file_rejects_invalid_final_without_overwriting(tmp_path: 
 
 def _write_json(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=True, indent=2), encoding="utf-8")
+
+
+def _write_accountability_artifacts(output_dir: Path, *, expected_count: int = 1) -> None:
+    _write_json(
+        output_dir / "extraction_run.json",
+        {
+            "observations": [f"Observed {expected_count} job-like unit(s) in the mounted page."],
+            "chosen_strategy": "test-fixture-accountable-extraction",
+            "extraction_steps": ["Prepared protocol outputs for validator test."],
+            "expected_output": {
+                "expected_job_count": expected_count,
+                "count_basis": "test fixture setup",
+                "count_rationale": "The validator test fixture creates exactly this many in-scope job records.",
+                "available_fields": {
+                    "title": "required_observed",
+                    "job_url": "required_observed",
+                },
+                "field_basis": {
+                    "title": "Test fixture job object includes title.",
+                    "job_url": "Test fixture job object includes job_url.",
+                },
+            },
+            "validation": {"valid": True},
+        },
+    )
+    (output_dir / "run_summary.md").write_text(
+        "The test extraction wrote complete protocol files, recorded the chosen strategy, "
+        "and reached the validator/finalizer gate for the targeted assertion.",
+        encoding="utf-8",
+    )
+
+
+def _write_minimal_valid_protocol(output_dir: Path) -> None:
+    _write_accountability_artifacts(output_dir)
+    job = {
+        "title": "Machine Learning Engineer",
+        "company_name": "Example AI",
+        "job_url": "https://example.com/jobs/ml",
+        "evidence": [{"text": "Machine Learning Engineer at Example AI"}],
+    }
+    candidates = {
+        "source": {"source_name": "Example", "source_url": "https://example.com/jobs"},
+        "jobs": [job],
+        "selectors": {},
+        "crawl": {"candidate_count": 1, "relevant_count": 1},
+        "warnings": [],
+    }
+    _write_json(output_dir / "page_profile.json", {"page_files": ["page.html"], "warnings": []})
+    _write_json(output_dir / "extraction_strategy.json", {"strategy": "test-fixture"})
+    _write_json(output_dir / "candidates.json", candidates)
+    _write_json(output_dir / "validation.json", {"valid": True, "candidate_count": 1, "warnings": []})
+    _write_json(
+        output_dir / "final.json",
+        {
+            "status": "success",
+            "output_schema": "job_extraction",
+            "summary": "Extracted one job.",
+            "result": candidates,
+            "protocol": {"valid": True, "warnings": []},
+        },
+    )

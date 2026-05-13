@@ -223,7 +223,7 @@ def _sandbox_start_cli(
     source_url: Annotated[str, typer.Option("--source-url", "--source_url", help="Original page URL for trace/protocol metadata only; sandbox still has no web access.")] = "",
     mode: Annotated[str, typer.Option(help="workflow extracts jobs; diagnostic runs small probes; debug is diagnostic with audit intent.")] = "workflow",
     max_commands_per_session: Annotated[int, typer.Option("--max-commands-per-session", "--max_commands_per_session", help="Hard cap on sandbox_exec commands before guardrail termination.")] = 20,
-    max_duration_seconds: Annotated[int, typer.Option("--max-duration-seconds", "--max_duration_seconds", help="Maximum wall-clock run duration before guardrail termination.")] = 300,
+    max_duration_seconds: Annotated[int, typer.Option("--max-duration-seconds", "--max_duration_seconds", help="Maximum wall-clock run duration before guardrail termination. Use 0 to disable.")] = 0,
     idle_timeout_seconds: Annotated[int, typer.Option("--idle-timeout-seconds", "--idle_timeout_seconds", help="Maximum idle time before guardrail termination.")] = 120,
     max_command_timeout_seconds: Annotated[int, typer.Option("--max-command-timeout-seconds", "--max_command_timeout_seconds", help="Per-command timeout ceiling inside the sandbox.")] = 30,
     max_stdout_bytes: Annotated[int, typer.Option("--max-stdout-bytes", "--max_stdout_bytes", help="Persisted stdout byte limit per command before guardrail termination.")] = 256_000,
@@ -677,7 +677,7 @@ def _inline_file_write_policy_error(command: str) -> str:
         return (
             "Do not use sandbox_exec.py for inline Python heredocs or shell snippets that write sandbox protocol files. "
             "Use scripts/sandbox_write_file.py for output/extractor.py and protocol file writes, then use "
-            "scripts/sandbox_exec.py only to inspect files, run output/extractor.py, validate outputs, or finalize."
+            "scripts/sandbox_exec.py only to inspect files, run supporting scripts, validate outputs, or finalize."
         )
     return ""
 
@@ -904,6 +904,19 @@ def _sandbox_write_cli(
     if record.status != "running":
         _emit({"status": record.status, "audit_id": args.audit_id, "error": f"sandbox is terminal: {record.status}"})
         return
+    target_policy_error = _workspace_write_target_error(args.path)
+    if target_policy_error:
+        _emit(
+            {
+                "status": "error",
+                "audit_id": args.audit_id,
+                "error_type": "write_target_not_allowed",
+                "path": args.path,
+                "written": False,
+                "error": target_policy_error,
+            }
+        )
+        return
     try:
         target = workspace_path(record, args.path)
     except ValueError:
@@ -1129,7 +1142,7 @@ def _sandbox_litellm_call_cli(
     messages_json: Annotated[str, typer.Option("--messages-json", "--messages_json", help="JSON list of OpenAI-style {role, content} messages.")] = "",
     response_format_json: Annotated[str, typer.Option("--response-format-json", "--response_format_json", help="Optional JSON response_format passed to LiteLLM, e.g. {\"type\":\"json_object\"}.")] = "",
     output_path: Annotated[str, typer.Option("--output-path", "--output_path", help="Optional workspace-relative path to persist response payload JSON.")] = "",
-    model: Annotated[str, typer.Option(help="LiteLLM model name. Defaults to SANDBOX_LLM_MODEL, then OPENAI_MODEL.")] = "",
+    model: Annotated[str, typer.Option(help="LiteLLM model name. Defaults to SANDBOX_LLM_MODEL, then JOB_SCRAPER_LLM_MODEL, then OPENAI_MODEL.")] = "",
     max_tokens: Annotated[int, typer.Option("--max-tokens", "--max_tokens", help="Maximum model output tokens.")] = 700,
     temperature: Annotated[float, typer.Option(help="Model temperature.")] = 0.0,
     user_id: Annotated[str, typer.Option("--user-id", "--user_id", help="ADK user id for registry lookup. Usually omit.")] = "user",
@@ -1147,7 +1160,13 @@ def _sandbox_litellm_call_cli(
         messages_json=messages_json,
         response_format_json=response_format_json,
         output_path=output_path,
-        model=model or os.getenv("SANDBOX_LLM_MODEL") or os.getenv("OPENAI_MODEL") or "openai/gpt-5.4-mini",
+        model=(
+            model
+            or os.getenv("SANDBOX_LLM_MODEL")
+            or os.getenv("JOB_SCRAPER_LLM_MODEL")
+            or os.getenv("OPENAI_MODEL")
+            or "openai/gpt-5.4-mini"
+        ),
         max_tokens=max_tokens,
         temperature=temperature,
         user_id=user_id,
@@ -1666,6 +1685,9 @@ def _apply_exact_workspace_replacement(
     old: str,
     new: str,
 ) -> dict[str, object]:
+    target_policy_error = _workspace_write_target_error(relative_path)
+    if target_policy_error:
+        raise SandboxPatchError(target_policy_error, error_type="write_target_not_allowed", path=relative_path)
     try:
         target = workspace_path(record, relative_path)
     except ValueError as exc:
@@ -1698,6 +1720,9 @@ def _apply_unified_workspace_patch(record: SandboxSessionRecord, patch_text: str
     changed_files: list[dict[str, object]] = []
     for section in sections:
         relative_path = section["path"]
+        target_policy_error = _workspace_write_target_error(relative_path)
+        if target_policy_error:
+            raise SandboxPatchError(target_policy_error, error_type="write_target_not_allowed", path=relative_path)
         try:
             target = workspace_path(record, relative_path)
         except ValueError as exc:
@@ -1720,6 +1745,9 @@ def _apply_codex_workspace_patch(record: SandboxSessionRecord, patch_text: str) 
     changed_files: list[dict[str, object]] = []
     for section in sections:
         relative_path = section["path"]
+        target_policy_error = _workspace_write_target_error(relative_path)
+        if target_policy_error:
+            raise SandboxPatchError(target_policy_error, error_type="write_target_not_allowed", path=relative_path)
         try:
             target = workspace_path(record, relative_path)
         except ValueError as exc:
@@ -1872,6 +1900,32 @@ def _strip_diff_prefix(path: str) -> str:
     if path.startswith("a/") or path.startswith("b/"):
         return path[2:]
     return path
+
+
+def _workspace_write_target_error(relative_path: str) -> str:
+    normalized = _normalize_workspace_relative_path(relative_path)
+    if not normalized:
+        return "workspace write path is required"
+    if normalized.startswith("/") or _path_has_parent_segment(normalized):
+        return "workspace write path must be workspace-relative and must not contain parent directory segments"
+    if normalized == "progress.json" or normalized.startswith("output/"):
+        return ""
+    return (
+        "workspace write target is read-only by policy. Modify only generated sandbox artifacts under "
+        "`output/` or `progress.json`; inspect mounted scripts, schemas, references, inputs, and page files "
+        "as read-only contracts instead."
+    )
+
+
+def _normalize_workspace_relative_path(path: str) -> str:
+    normalized = str(path or "").strip().replace("\\", "/")
+    while normalized.startswith("./"):
+        normalized = normalized[2:]
+    return normalized
+
+
+def _path_has_parent_segment(path: str) -> bool:
+    return any(part == ".." for part in path.split("/"))
 
 
 def _validate_patched_content(relative_path: str, content: str) -> None:
@@ -2040,14 +2094,16 @@ def _final_artifact_sources(record: SandboxSessionRecord) -> list[dict[str, obje
     output_mime_types = {
         ".json": "application/json",
         ".md": "text/markdown",
+        ".py": "text/x-python",
     }
-    output_dir = workspace / "output"
-    for output_file in sorted(output_dir.iterdir()) if output_dir.exists() else []:
-        mime_type = output_mime_types.get(output_file.suffix)
-        if not output_file.is_file() or not mime_type:
-            continue
-        key = f"output_{output_file.stem}"
-        paths[key] = (str(output_file.relative_to(workspace)), mime_type)
+    for relative_dir in ("output", "scratch"):
+        artifact_dir = workspace / relative_dir
+        for output_file in sorted(artifact_dir.rglob("*")) if artifact_dir.exists() else []:
+            mime_type = output_mime_types.get(output_file.suffix)
+            if not output_file.is_file() or not mime_type:
+                continue
+            key = f"{relative_dir}_{output_file.relative_to(artifact_dir).with_suffix('').as_posix().replace('/', '_')}"
+            paths[key] = (str(output_file.relative_to(workspace)), mime_type)
     return _artifact_sources_for_paths(record.audit_id, workspace, paths)
 
 
@@ -2055,9 +2111,11 @@ def _validate_sandbox_protocol(output_dir: Path) -> dict[str, object]:
     required_files = [
         "output/page_profile.json",
         "output/extraction_strategy.json",
+        "output/extraction_run.json",
         "output/candidates.json",
         "output/validation.json",
         "output/final.json",
+        "output/run_summary.md",
     ]
     missing_files = [relative for relative in required_files if not (output_dir.parent / relative).exists()]
     if missing_files:

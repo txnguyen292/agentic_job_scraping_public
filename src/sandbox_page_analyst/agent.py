@@ -1,25 +1,15 @@
 from __future__ import annotations
 
 import os
-from typing import Any
 
 from google.adk import Agent
 from google.adk.apps.app import App
-from google.adk.models.lite_llm import LiteLlm
 
+from job_scraper.litellm_model import SerializableLiteLlm
 from sandbox_page_analyst.adk_tools import run_page_analysis
 
 
-DEFAULT_MODEL = os.getenv("OPENAI_MODEL", "openai/gpt-5.4-mini")
-
-
-class SerializableLiteLlm(LiteLlm):
-    """LiteLLM model wrapper that keeps ADK Web graph serialization safe."""
-
-    def model_dump(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        payload = super().model_dump(*args, **kwargs)
-        payload.pop("llm_client", None)
-        return payload
+DEFAULT_MODEL = os.getenv("JOB_SCRAPER_LLM_MODEL") or os.getenv("OPENAI_MODEL") or "openai/gpt-5.4-mini"
 
 
 root_agent = Agent(

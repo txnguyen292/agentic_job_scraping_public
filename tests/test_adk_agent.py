@@ -39,6 +39,7 @@ def test_agent_loads_runtime_tools_from_allowed_tools_contract() -> None:
         "render_page",
         "fetch_page_to_workspace",
         "render_page_to_workspace",
+        "load_test_fixture_page_to_workspace",
         "update_extraction_context",
         "promote_sandbox_extraction",
         "upsert_job",
@@ -152,6 +153,7 @@ def test_root_agent_uses_adk_skill_toolset_when_adk_is_installed() -> None:
         root_agent,
     )
     from job_scraper.adk_plugins import (
+        ModelReasoningTelemetryPlugin,
         SandboxNoteRefinementPlugin,
         SandboxOutputGatePlugin,
         SandboxWorkflowGuardPlugin,
@@ -172,6 +174,7 @@ def test_root_agent_uses_adk_skill_toolset_when_adk_is_installed() -> None:
     assert app.root_agent is root_agent
     assert [type(plugin) for plugin in app.plugins] == [
         TransientModelRetryPlugin,
+        ModelReasoningTelemetryPlugin,
         SandboxWorkflowGuardPlugin,
         SandboxNoteRefinementPlugin,
         SandboxOutputGatePlugin,
@@ -205,6 +208,249 @@ def test_litellm_model_dump_is_graph_serializable() -> None:
     assert "llm_client" not in dumped_model
 
 
+def test_litellm_reasoning_effort_can_be_configured_from_env(monkeypatch) -> None:
+    pytest.importorskip("google.adk")
+
+    monkeypatch.setenv("JOB_SCRAPER_REASONING_EFFORT", "high")
+
+    from job_scraper.litellm_model import SerializableLiteLlm
+
+    llm = SerializableLiteLlm(model="openai/gpt-5.4-mini")
+
+    assert llm._additional_args["reasoning_effort"] == {"effort": "high", "summary": "auto"}
+    assert llm._additional_args["drop_params"] is True
+    assert llm.model_dump(mode="python") == {
+        "model": "openai/gpt-5.4-mini",
+        "reasoning_effort": {"effort": "high", "summary": "auto"},
+    }
+
+
+def test_litellm_reasoning_summary_can_be_disabled(monkeypatch) -> None:
+    pytest.importorskip("google.adk")
+
+    monkeypatch.setenv("JOB_SCRAPER_REASONING_EFFORT", "high")
+    monkeypatch.setenv("JOB_SCRAPER_REASONING_SUMMARY", "off")
+
+    from job_scraper.litellm_model import SerializableLiteLlm
+
+    llm = SerializableLiteLlm(model="openai/gpt-5.4-mini")
+
+    assert llm._additional_args["reasoning_effort"] == "high"
+    assert llm.model_dump(mode="python") == {
+        "model": "openai/gpt-5.4-mini",
+        "reasoning_effort": "high",
+    }
+
+
+def test_litellm_reasoning_effort_rejects_invalid_env(monkeypatch) -> None:
+    pytest.importorskip("google.adk")
+
+    monkeypatch.setenv("JOB_SCRAPER_REASONING_EFFORT", "a-lot")
+
+    from job_scraper.litellm_model import SerializableLiteLlm
+
+    with pytest.raises(ValueError, match="JOB_SCRAPER_REASONING_EFFORT"):
+        SerializableLiteLlm(model="openai/gpt-5.4-mini")
+
+
+def test_litellm_malformed_tool_json_is_returned_to_model(monkeypatch) -> None:
+    pytest.importorskip("google.adk")
+
+    from google.adk.models.lite_llm import LiteLlm
+    from google.adk.models.llm_request import LlmRequest
+    from google.adk.models.llm_response import LlmResponse
+    from google.genai import types
+
+    from job_scraper.litellm_model import SerializableLiteLlm
+
+    calls: list[list[str]] = []
+
+    async def fake_generate_content_async(self, llm_request, stream=False):
+        calls.append(
+            [
+                part.text
+                for content in llm_request.contents
+                for part in (content.parts or [])
+                if part.text
+            ]
+        )
+        if len(calls) == 1:
+            raise json.JSONDecodeError(
+                "Invalid control character",
+                '{"args":["python3 -c "\n"]}',
+                22,
+            )
+        yield LlmResponse(content=types.Content(role="model", parts=[types.Part.from_text(text="recovered")]))
+
+    monkeypatch.setattr(LiteLlm, "generate_content_async", fake_generate_content_async)
+
+    llm = SerializableLiteLlm(model="deepseek/deepseek-v4-pro")
+    request = LlmRequest(
+        contents=[
+            types.Content(role="user", parts=[types.Part.from_text(text="run the next sandbox step")])
+        ]
+    )
+
+    async def collect():
+        return [response async for response in llm.generate_content_async(request)]
+
+    responses = asyncio.run(collect())
+
+    assert responses[0].content.parts[0].text == "recovered"
+    assert len(calls) == 2
+    assert any("function-call arguments were not valid JSON" in text for text in calls[1])
+    assert any("Do not put literal newline/control characters" in text for text in calls[1])
+
+
+def test_litellm_provider_json_error_is_returned_to_model(monkeypatch) -> None:
+    pytest.importorskip("google.adk")
+
+    from google.adk.models.lite_llm import LiteLlm
+    from google.adk.models.llm_request import LlmRequest
+    from google.adk.models.llm_response import LlmResponse
+    from google.genai import types
+
+    from job_scraper.litellm_model import SerializableLiteLlm
+
+    APIError = type("APIError", (Exception,), {})
+    calls: list[list[str]] = []
+
+    async def fake_generate_content_async(self, llm_request, stream=False):
+        calls.append(
+            [
+                part.text
+                for content in llm_request.contents
+                for part in (content.parts or [])
+                if part.text
+            ]
+        )
+        if len(calls) == 1:
+            raise APIError("Unable to get json response - Expecting value: line 1 column 1")
+        yield LlmResponse(content=types.Content(role="model", parts=[types.Part.from_text(text="recovered")]))
+
+    monkeypatch.setattr(LiteLlm, "generate_content_async", fake_generate_content_async)
+
+    llm = SerializableLiteLlm(model="deepseek/deepseek-v4-pro")
+    request = LlmRequest(
+        contents=[
+            types.Content(role="user", parts=[types.Part.from_text(text="write the extraction script")])
+        ]
+    )
+
+    async def collect():
+        return [response async for response in llm.generate_content_async(request)]
+
+    responses = asyncio.run(collect())
+
+    assert responses[0].content.parts[0].text == "recovered"
+    assert len(calls) == 2
+    assert any("previous model call failed" in text for text in calls[1])
+    assert any("exactly one valid tool call" in text for text in calls[1])
+
+
+def test_litellm_provider_json_error_emits_terminal_response_after_retry(monkeypatch) -> None:
+    pytest.importorskip("google.adk")
+
+    from google.adk.models.lite_llm import LiteLlm
+    from google.adk.models.llm_request import LlmRequest
+    from google.genai import types
+
+    from job_scraper.litellm_model import SerializableLiteLlm
+
+    APIError = type("APIError", (Exception,), {})
+
+    async def fake_generate_content_async(self, llm_request, stream=False):
+        raise APIError("Unable to get json response - Expecting value: line 1 column 1")
+        yield
+
+    monkeypatch.setattr(LiteLlm, "generate_content_async", fake_generate_content_async)
+
+    llm = SerializableLiteLlm(model="deepseek/deepseek-v4-pro")
+    request = LlmRequest(
+        contents=[types.Content(role="user", parts=[types.Part.from_text(text="continue")])]
+    )
+
+    async def collect():
+        return [response async for response in llm.generate_content_async(request)]
+
+    responses = asyncio.run(collect())
+
+    assert responses[0].error_code == "PROVIDER_JSON_RESPONSE_ERROR"
+    assert "Unable to get json response" in responses[0].error_message
+
+
+def test_litellm_provider_timeout_is_returned_to_model(monkeypatch) -> None:
+    pytest.importorskip("google.adk")
+
+    from google.adk.models.lite_llm import LiteLlm
+    from google.adk.models.llm_request import LlmRequest
+    from google.adk.models.llm_response import LlmResponse
+    from google.genai import types
+
+    from job_scraper.litellm_model import SerializableLiteLlm
+
+    calls: list[list[str]] = []
+
+    async def fake_generate_content_async(self, llm_request, stream=False):
+        calls.append(
+            [
+                part.text
+                for content in llm_request.contents
+                for part in (content.parts or [])
+                if part.text
+            ]
+        )
+        if len(calls) == 1:
+            await asyncio.sleep(1)
+        yield LlmResponse(content=types.Content(role="model", parts=[types.Part.from_text(text="recovered")]))
+
+    monkeypatch.setattr(LiteLlm, "generate_content_async", fake_generate_content_async)
+
+    llm = SerializableLiteLlm(model="deepseek/deepseek-v4-pro", timeout=0.01)
+    request = LlmRequest(
+        contents=[types.Content(role="user", parts=[types.Part.from_text(text="continue")])]
+    )
+
+    async def collect():
+        return [response async for response in llm.generate_content_async(request)]
+
+    responses = asyncio.run(collect())
+
+    assert responses[0].content.parts[0].text == "recovered"
+    assert len(calls) == 2
+    assert any("previous model call timed out" in text for text in calls[1])
+    assert any("exactly one valid tool call" in text for text in calls[1])
+
+
+def test_litellm_provider_timeout_emits_terminal_response_after_retry(monkeypatch) -> None:
+    pytest.importorskip("google.adk")
+
+    from google.adk.models.lite_llm import LiteLlm
+    from google.adk.models.llm_request import LlmRequest
+    from google.genai import types
+
+    from job_scraper.litellm_model import SerializableLiteLlm
+
+    async def fake_generate_content_async(self, llm_request, stream=False):
+        await asyncio.sleep(1)
+        yield
+
+    monkeypatch.setattr(LiteLlm, "generate_content_async", fake_generate_content_async)
+
+    llm = SerializableLiteLlm(model="deepseek/deepseek-v4-pro", timeout=0.01)
+    request = LlmRequest(
+        contents=[types.Content(role="user", parts=[types.Part.from_text(text="continue")])]
+    )
+
+    async def collect():
+        return [response async for response in llm.generate_content_async(request)]
+
+    responses = asyncio.run(collect())
+
+    assert responses[0].error_code == "PROVIDER_TIMEOUT"
+    assert "timed out after 0.01 seconds" in responses[0].error_message
+
+
 def test_root_agent_instruction_requires_sandbox_for_url_scraping() -> None:
     pytest.importorskip("google.adk")
 
@@ -217,13 +463,20 @@ def test_root_agent_instruction_requires_sandbox_for_url_scraping() -> None:
     assert "before loading skills" in root_agent.instruction
     assert "call list_skill_resources instead of guessing" in root_agent.instruction
     assert "Use --help on a listed script only when you need its arguments" in root_agent.instruction
+    assert "After loading a skill or skill resource for a scraping workflow" in root_agent.instruction
+    assert "the loaded instructions become session state" in root_agent.instruction
+    assert "record which skill/resource was loaded" in root_agent.instruction
     assert "follow the mode reference it instructs you to load" in root_agent.instruction
     assert "Use direct fetch/render tools only for explicit diagnostics" in root_agent.instruction
     assert "compact reasoning notebook" in root_agent.instruction
+    assert "`initial_plan` is the broad workflow startup plan" in root_agent.instruction
+    assert "`extraction_strategy`" in root_agent.instruction
+    assert "enhance it when new evidence" in root_agent.instruction
+    assert "revise it when new evidence or validation/finalization contradicts it" in root_agent.instruction
     assert "record what you observe" in root_agent.instruction
     assert "how those observations should produce the required outputs" in root_agent.instruction
     assert "reconcile the new result with the context" in root_agent.instruction
-    assert "Page inspection is for deriving extractor logic" in root_agent.instruction
+    assert "Page inspection is for deriving observations, evidence, and method choices" in root_agent.instruction
     assert "use validate_outputs.py or sandbox_finalize.py as the authority" in root_agent.instruction
     assert "do not decide that an output count is too broad or too narrow from intuition alone" in root_agent.instruction
     assert "the next phase is validation/finalization, not another rewrite" in root_agent.instruction
@@ -232,11 +485,25 @@ def test_root_agent_instruction_requires_sandbox_for_url_scraping() -> None:
     assert "Before every tool call" in root_agent.instruction
     assert "latest exact tool result plus the injected session state" in root_agent.instruction
     assert "derive the next logical action" in root_agent.instruction
-    assert "`known_errors`, `attempted_actions`, `immediate_goal`, `last_result`, `extraction_plan`, `observations`" in root_agent.instruction
+    assert "`known_errors`, `attempted_actions`, `immediate_goal`, `last_result`" in root_agent.instruction
+    assert "`extraction_strategy`, `extraction_plan`, `observations`" in root_agent.instruction
     assert "`planned_next_tool`" in root_agent.instruction
     assert "`repair_scope` as the bounded work order" in root_agent.instruction
-    assert "`required_outputs` and `workflow_contract`" in root_agent.instruction
-    assert "output/extractor.py is the producer" in root_agent.instruction
+    assert "`workflow_reflections` inside update_extraction_context" in root_agent.instruction
+    assert "learned interpretation of the failure pattern" in root_agent.instruction
+    assert "not as fixed tool recipes" in root_agent.instruction
+    assert "`required_outputs`, `workflow_contract`, `evidence_contract`," in root_agent.instruction
+    assert "`expected_output`" in root_agent.instruction
+    assert "`unsatisfied_requirements`" in root_agent.instruction
+    assert "not a scripted recipe" in root_agent.instruction
+    assert "how you came to believe that expected count" in root_agent.instruction
+    assert "Use that same repeated-unit basis" in root_agent.instruction
+    assert "Inspect available tools/resources" in root_agent.instruction
+    assert "count_basis plus count_rationale up front" in root_agent.instruction
+    assert "bounded evidence or recorded script output" in root_agent.instruction
+    assert "`evidence_contract`" in root_agent.instruction
+    assert "the agent chooses and owns the extraction method" in root_agent.instruction
+    assert "supporting scripts may inspect/parse/extract/validate/serialize" in root_agent.instruction
     assert "Keep each repair incremental" in root_agent.instruction
     assert "most efficient next available tool call" in root_agent.instruction
     assert "If the planned tool itself fails" in root_agent.instruction
@@ -246,6 +513,8 @@ def test_root_agent_instruction_requires_sandbox_for_url_scraping() -> None:
     assert "If update_extraction_context itself returns an error" in root_agent.instruction
     assert "rerun update_extraction_context before continuing" in root_agent.instruction
     assert "remove or rewrite that stale error" in root_agent.instruction
+    assert '`status: "success"` means the requested action is verified complete' in root_agent.instruction
+    assert "mark that path satisfied in your working state" in root_agent.instruction
     assert "choose an action that changes state instead of probing again" in root_agent.instruction
     assert "Treat SESSION_EXTRACTION_CONTEXT as the commanding guide" in root_agent.instruction
     assert "Treat RUNTIME_SANDBOX_NOTES as supporting evidence" in root_agent.instruction
@@ -273,6 +542,7 @@ def test_allowed_tools_are_exposed_after_skill_activation() -> None:
     assert "fetch_page" in tool_names
     assert "render_page" in tool_names
     assert "fetch_page_to_workspace" in tool_names
+    assert "load_test_fixture_page_to_workspace" in tool_names
     assert "run_sandbox_agent" not in tool_names
     assert "promote_sandbox_extraction" in tool_names
     assert "upsert_job" in tool_names
@@ -406,11 +676,11 @@ def test_instruction_surface_ownership_keeps_sandbox_workflow_details_in_workflo
     workflow_text = Path("skills/sandbox-page-analyst/references/workflow-mode.md").read_text(encoding="utf-8")
 
     workflow_owned_phrases = [
-        "derive extraction patterns",
-        "derive recurring job-post patterns",
-        "Do not hand-write job records",
-        "Treat extraction as pattern discovery plus code generation",
-        "If the extractor emits 20 valid candidates",
+        "derive repeated evidence patterns",
+        "The agent is responsible for the extraction outcome",
+        "Do not ingest unbounded evidence",
+        "Treat scripts as auditable supporting artifacts",
+        "If the agent extracts 20 valid candidates",
         "output/reference_proposal.md",
     ]
 

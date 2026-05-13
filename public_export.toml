@@ -7,8 +7,10 @@ description = "Allowlisted public snapshot derived from the private/internal age
 include = [
   ".dockerignore",
   ".github/workflows/public-export-verify.yml",
+  ".github/PULL_REQUEST_TEMPLATE.md",
   ".gitignore",
   ".python-version",
+  "CHANGELOG.md",
   "DESIGN_SPEC.md",
   "README.md",
   "docker/**",
@@ -20,6 +22,7 @@ include = [
   "pyproject.toml",
   "public_export.toml",
   "reports/index.md",
+  "scripts/release_notes.py",
   "scripts/sync_public.py",
   "seeds/**",
   "skills/**",

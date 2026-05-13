@@ -81,6 +81,11 @@ STATIC_TOOL_POLICIES: dict[str, ToolPolicy] = {
         counts_as_intervening_action=True,
         changes_workflow_output=True,
     ),
+    "load_test_fixture_page_to_workspace": ToolPolicy(
+        kind=ToolActionKind.WORKFLOW_ACTION,
+        counts_as_intervening_action=True,
+        changes_workflow_output=True,
+    ),
     "promote_sandbox_extraction": ToolPolicy(
         kind=ToolActionKind.PERSISTENCE_ACTION,
         counts_as_intervening_action=True,

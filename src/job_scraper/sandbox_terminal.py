@@ -17,7 +17,7 @@ SAFE_SEGMENT_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 
 class SandboxLimits(BaseModel):
     max_commands_per_session: int = 20
-    max_duration_seconds: int = 300
+    max_duration_seconds: int = 0
     idle_timeout_seconds: int = 120
     max_command_timeout_seconds: int = 30
     max_stdout_bytes: int = 256_000
@@ -192,7 +192,7 @@ def reserve_command_slot(
         limits = SandboxLimits.model_validate(record.limits or {})
         created_at = datetime.fromisoformat(record.created_at)
         elapsed_seconds = (datetime.now(timezone.utc) - created_at).total_seconds()
-        if elapsed_seconds >= limits.max_duration_seconds:
+        if limits.max_duration_seconds > 0 and elapsed_seconds >= limits.max_duration_seconds:
             record.status = "guardrail_triggered"
             record.guardrail = "max_duration_seconds"
             record.error = "Sandbox duration limit exhausted."
