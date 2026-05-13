@@ -16,6 +16,22 @@
           "location_raw": {"type": "string"},
           "description_text": {"type": "string"},
           "tags": {"type": "array", "items": {"type": "string"}},
+          "field_rationale": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "required": ["evidence_refs", "rationale"],
+              "properties": {
+                "value": {},
+                "evidence_refs": {
+                  "type": "array",
+                  "items": {"type": "string"},
+                  "minItems": 1
+                },
+                "rationale": {"type": "string", "minLength": 1}
+              }
+            }
+          },
           "evidence": {"type": "array"}
         }
       }

@@ -12,6 +12,7 @@ from job_scraper.adk_tools import (
     fetch_page,
     fetch_page_to_workspace,
     list_seed_references,
+    load_test_fixture_page_to_workspace,
     persist_sandbox_job_extraction,
     promote_sandbox_extraction,
     query_jobs,
@@ -70,6 +71,20 @@ def test_update_extraction_context_writes_session_state_only() -> None:
         page_id="page_123",
         observations=["20 job-card markers", "64 broad links included navigation"],
         extraction_plan=["select one repeated job-card container per job"],
+        extraction_strategy={
+            "status": "active",
+            "derived_from": "first representative ITviec card and 20-card count probe",
+            "target_units": "one job per repeated job-card container",
+            "unit_boundary": "[data-search--pagination-target='jobCard']",
+            "count_method": "count repeated card containers",
+            "field_patterns": {
+                "title": "jobTitle target text",
+                "company_name": "visible company text near title",
+            },
+            "known_exclusions": ["navigation links", "company preview links"],
+            "coverage_plan": "create and load one evidence chunk per card",
+            "revision_policy": "enhance with new field patterns; revise on validator/finalizer contradiction",
+        },
         last_result={"status": "invalid", "count": 64},
         known_errors=["navigation links were included"],
         attempted_actions=["checked output/final.json existence", "read placeholder output/extractor.py"],
@@ -105,6 +120,27 @@ def test_update_extraction_context_writes_session_state_only() -> None:
             "success_gate": "validate and finalize before persistence",
             "repair_rule": "repair missing outputs at producer",
         },
+        expected_output={
+            "expected_job_count": 20,
+            "count_basis": "20 job-card markers",
+            "count_rationale": "The prior repeated-card observation counted 20 job-card markers, which map one-to-one to expected listings.",
+            "required_evidence": "one loaded evidence chunk per repeated job-card",
+        },
+        output_contract={
+            "contract_version": "sandbox-page-analyst-protocol-v1",
+            "extraction_run_json": {"required": ["observations", "chosen_strategy", "expected_output"]},
+        },
+        producer_output_plan={
+            "required_outputs": ["output/extraction_run.json", "output/candidates.json", "output/final.json"],
+            "extraction_run": {"chosen_strategy": "one repeated card per job"},
+        },
+        script_manifest_plan={
+            "required_if_supporting_scripts_authored": True,
+            "version_field": "workflow_version",
+        },
+        validation_plan={
+            "steps": ["validate_outputs.py", "sandbox_finalize.py"],
+        },
         tool_context=context,  # type: ignore[arg-type]
     )
 
@@ -118,15 +154,34 @@ def test_update_extraction_context_writes_session_state_only() -> None:
     assert saved["final_goal"] == "Extract AI/ML jobs from the target listing URL and save validated records."
     assert saved["initial_plan"] == ["save page workspace", "derive recurring job-card pattern", "run sandbox extractor"]
     assert saved["observations"] == ["20 job-card markers", "64 broad links included navigation"]
+    assert saved["extraction_strategy"]["target_units"] == "one job per repeated job-card container"
+    assert saved["extraction_strategy"]["field_patterns"]["company_name"] == "visible company text near title"
     assert saved["attempted_actions"] == ["checked output/final.json existence", "read placeholder output/extractor.py"]
     assert saved["last_result"] == {"status": "invalid", "count": 64}
     assert saved["planned_next_tool"]["file_path"] == "scripts/sandbox_apply_patch.py"
     assert saved["repair_scope"]["files"] == ["output/extractor.py"]
     assert saved["required_outputs"][-1] == "output/final.json"
     assert saved["workflow_contract"]["producer"] == "output/extractor.py"
+    assert saved["expected_output"]["expected_job_count"] == 20
+    assert saved["output_contract"]["contract_version"] == "sandbox-page-analyst-protocol-v1"
+    assert saved["producer_output_plan"]["extraction_run"]["chosen_strategy"] == "one repeated card per job"
+    assert saved["script_manifest_plan"]["version_field"] == "workflow_version"
+    assert saved["validation_plan"]["steps"] == ["validate_outputs.py", "sandbox_finalize.py"]
     assert result["planned_next_tool"]["target_paths"] == ["output/extractor.py"]
     assert result["repair_scope"]["objective"] == "fix over-broad extraction"
     assert result["workflow_contract"]["success_gate"] == "validate and finalize before persistence"
+    assert result["expected_output"]["count_basis"] == "20 job-card markers"
+    assert result["extraction_strategy"]["count_method"] == "count repeated card containers"
+    assert result["output_contract"]["extraction_run_json"]["required"] == [
+        "observations",
+        "chosen_strategy",
+        "expected_output",
+    ]
+    assert result["producer_output_plan"]["required_outputs"] == [
+        "output/extraction_run.json",
+        "output/candidates.json",
+        "output/final.json",
+    ]
 
 
 def test_update_extraction_context_merges_attempted_actions_without_duplicates() -> None:
@@ -189,6 +244,37 @@ def test_update_extraction_context_replaces_current_state_fields() -> None:
     assert saved["known_errors"] == []
     assert saved["immediate_goal"] == "validate outputs"
     assert saved["planned_next_tool"]["file_path"] == "scripts/validate_outputs.py"
+
+
+def test_update_extraction_context_records_workflow_reflections() -> None:
+    context = FakeToolContext()
+
+    result = update_extraction_context(
+        workflow_reflections=[
+            {
+                "trigger": "expected_output_count_mismatch",
+                "lesson": "A count mismatch means evidence or output coverage is incomplete unless scope changed.",
+                "diagnostic_question": "Which expected repeated units lack loaded evidence or serialized output?",
+                "state_changing_actions": [
+                    "load bounded evidence for missing units",
+                    "patch serialization if loaded units were omitted",
+                    "write needs_review if evidence cannot be assembled safely",
+                ],
+                "anti_actions": ["rewrite the same candidates payload", "read unrelated progress.json"],
+            }
+        ],
+        tool_context=context,  # type: ignore[arg-type]
+    )
+
+    saved = context.state[SESSION_EXTRACTION_CONTEXT_STATE_KEY]
+    assert result["status"] == "success"
+    assert result["workflow_reflections_count"] == 1
+    assert saved["workflow_reflections"][0]["trigger"] == "expected_output_count_mismatch"
+    assert "coverage is incomplete" in saved["workflow_reflections"][0]["lesson"]
+    assert saved["workflow_reflections"][0]["anti_actions"] == [
+        "rewrite the same candidates payload",
+        "read unrelated progress.json",
+    ]
 
 
 def test_update_extraction_context_rejects_stale_known_errors_after_success() -> None:
@@ -437,6 +523,33 @@ def test_fetch_page_to_workspace_saves_adk_artifacts_when_context_is_available(m
         f"pages__{result['page_id']}__page.html",
         f"pages__{result['page_id']}__metadata.json",
     }
+
+
+def test_load_test_fixture_page_to_workspace_stores_fixed_html(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(adk_tools, "PAGE_WORKSPACE_ROOT", tmp_path)
+
+    result = asyncio.run(load_test_fixture_page_to_workspace("itviec_ai_engineer_ha_noi"))
+
+    assert result["status"] == "success"
+    assert result["fixture_name"] == "itviec_ai_engineer_ha_noi"
+    assert result["fetch_mode"] == "test_fixture:itviec_ai_engineer_ha_noi"
+    assert result["url"].startswith("https://itviec.com/it-jobs/ai-engineer/ha-noi")
+    assert result["fixture_file"].endswith("tests/fixtures/itviec_ai_engineer_ha_noi.html")
+    assert result["expected_fixture_file"].endswith("tests/fixtures/itviec_ai_engineer_ha_noi.expected.json")
+    assert "content" not in result
+    assert result["content_bytes"] > 100_000
+    assert result["signals"]["job_like_links"] > 0
+    artifact_path = Path(result["artifact_path"])
+    assert artifact_path.is_absolute()
+    assert artifact_path.read_text(encoding="utf-8").startswith("<!DOCTYPE html>")
+
+
+def test_load_test_fixture_page_to_workspace_rejects_unknown_fixture() -> None:
+    result = asyncio.run(load_test_fixture_page_to_workspace("missing_fixture"))
+
+    assert result["status"] == "error"
+    assert result["recommended_next"] == "choose_available_fixture"
+    assert result["available_fixtures"] == ["itviec_ai_engineer_ha_noi"]
 
 
 def test_run_sandbox_agent_resolves_page_ids_to_workspace_files(monkeypatch, tmp_path: Path) -> None:

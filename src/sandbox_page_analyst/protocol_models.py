@@ -17,7 +17,31 @@ class ProtocolEvidence(BaseModel):
 
     file: str = ""
     locator: str = ""
+    ref: str = ""
     text: str = Field(default="", max_length=500)
+
+
+class ProtocolFieldRationale(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    value: Any = None
+    evidence_refs: list[str]
+    rationale: str
+
+    @field_validator("evidence_refs")
+    @classmethod
+    def _require_evidence_refs(cls, value: list[str]) -> list[str]:
+        if not value or not any(str(ref).strip() for ref in value):
+            raise ValueError("evidence_refs must include at least one evidence chunk id")
+        return value
+
+    @field_validator("rationale")
+    @classmethod
+    def _require_rationale(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("rationale is required")
+        return cleaned
 
 
 class ProtocolJob(BaseModel):
@@ -38,6 +62,7 @@ class ProtocolJob(BaseModel):
     relevance_reason: str = ""
     tags: list[Any] = Field(default_factory=list)
     evidence: list[ProtocolEvidence] = Field(default_factory=list)
+    field_rationale: dict[str, ProtocolFieldRationale] = Field(default_factory=dict)
 
     @field_validator("title", "job_url")
     @classmethod
@@ -100,6 +125,66 @@ class ValidationOutput(BaseModel):
     warnings: list[Any] = Field(default_factory=list)
 
 
+class ExtractionRunOutput(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    page: dict[str, Any] = Field(default_factory=dict)
+    observations: list[Any]
+    chosen_strategy: str = ""
+    extraction_steps: list[Any] = Field(default_factory=list)
+    expected_output: dict[str, Any] = Field(default_factory=dict)
+    validation: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("observations")
+    @classmethod
+    def _require_observations(cls, value: list[Any]) -> list[Any]:
+        if not value:
+            raise ValueError("observations must describe the page/layout signals used for extraction")
+        return value
+
+    @model_validator(mode="after")
+    def _require_strategy(self) -> "ExtractionRunOutput":
+        strategy = self.chosen_strategy or str(getattr(self, "strategy", "") or "")
+        if not strategy.strip():
+            raise ValueError("chosen_strategy is required")
+        return self
+
+
+class ScriptManifestEntry(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    path: str
+    purpose: str
+    inputs: list[Any] = Field(default_factory=list)
+    outputs: list[Any] = Field(default_factory=list)
+    sha256: str = ""
+    workflow_version: str = ""
+    reference_version: str = ""
+    reuse: str = "run_specific"
+    validation_result: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("path", "purpose")
+    @classmethod
+    def _require_non_empty_text(cls, value: str, info: Any) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError(f"{info.field_name} is required")
+        return cleaned
+
+
+class ScriptManifestOutput(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    scripts: list[ScriptManifestEntry]
+
+    @field_validator("scripts")
+    @classmethod
+    def _require_scripts(cls, value: list[ScriptManifestEntry]) -> list[ScriptManifestEntry]:
+        if not value:
+            raise ValueError("scripts must include every authored supporting script")
+        return value
+
+
 class FinalOutput(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -124,6 +209,8 @@ class ReferenceProposalOutput(BaseModel):
 PROTOCOL_MODEL_BY_PATH = {
     "output/page_profile.json": PageProfileOutput,
     "output/extraction_strategy.json": ExtractionStrategyOutput,
+    "output/extraction_run.json": ExtractionRunOutput,
+    "output/script_manifest.json": ScriptManifestOutput,
     "output/candidates.json": CandidatesOutput,
     "output/validation.json": ValidationOutput,
     "output/final.json": FinalOutput,

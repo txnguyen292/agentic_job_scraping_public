@@ -11,7 +11,7 @@
           "user_content": {
             "parts": [
               {
-                "text": "Use the job-listing-scout skill to scrape the ITViec AI Engineer Hanoi page. Do not return full HTML. Save validated jobs and report the extracted job count, proposal file paths, and a short summary."
+                "text": "Use the job-listing-scout skill to extract job listings from the fixed ITviec AI Engineer Hanoi HTML fixture. Have the agent write extractor code against that fixed HTML workspace input. Do not return full HTML. Save validated jobs and report the extracted job count, proposal file paths, and a short summary."
               }
             ]
           },
@@ -35,6 +35,12 @@
                 "name": "load_skill",
                 "args": {
                   "skill_name": "sandbox-page-analyst"
+                }
+              },
+              {
+                "name": "load_test_fixture_page_to_workspace",
+                "args": {
+                  "fixture_name": "itviec_ai_engineer_ha_noi"
                 }
               }
             ]

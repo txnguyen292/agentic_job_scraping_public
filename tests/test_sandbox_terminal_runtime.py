@@ -23,10 +23,13 @@ from job_scraper.sandbox_terminal import (
 )
 from job_scraper.sandbox_terminal_scripts import _workspace_file_specs
 from job_scraper.sandbox_terminal_scripts import _bounded_command_output
+from job_scraper.sandbox_terminal_scripts import _apply_exact_workspace_replacement
 from job_scraper.sandbox_terminal_scripts import _cleanup_stale_sandbox_containers
 from job_scraper.sandbox_terminal_scripts import _parse_sandbox_exec_args
 from job_scraper.sandbox_terminal_scripts import _resolve_docker_cli
+from job_scraper.sandbox_terminal_scripts import _workspace_write_target_error
 from job_scraper.sandbox_terminal_scripts import DEFAULT_IMAGE
+from job_scraper.sandbox_terminal_scripts import SandboxPatchError
 from job_scraper.sandbox_terminal_scripts import sandbox_exec_main
 
 
@@ -445,6 +448,50 @@ def test_reserve_command_slot_increments_until_budget_then_triggers_guardrail(tm
     assert second.record.guardrail == "max_commands_per_session"
 
 
+def test_reserve_command_slot_does_not_expire_by_wall_clock_by_default(tmp_path: Path) -> None:
+    registry = SandboxRegistry(app_root=tmp_path)
+    record = SandboxSessionRecord(
+        app_name="job_scraper",
+        user_id="user",
+        session_id="session",
+        audit_id="sandbox_run_123",
+        container_id="container",
+        workspace_path="/tmp/workspace",
+        status="running",
+        limits=SandboxLimits(max_commands_per_session=2).model_dump(),
+    )
+    record.created_at = "2000-01-01T00:00:00+00:00"
+    registry.save(record)
+
+    result = reserve_command_slot(registry=registry, user_id="user", session_id="session", audit_id="sandbox_run_123")
+
+    assert result.allowed is True
+    assert result.record.command_count == 1
+    assert result.record.guardrail == ""
+
+
+def test_reserve_command_slot_expiration_remains_available_when_configured(tmp_path: Path) -> None:
+    registry = SandboxRegistry(app_root=tmp_path)
+    record = SandboxSessionRecord(
+        app_name="job_scraper",
+        user_id="user",
+        session_id="session",
+        audit_id="sandbox_run_123",
+        container_id="container",
+        workspace_path="/tmp/workspace",
+        status="running",
+        limits=SandboxLimits(max_duration_seconds=1).model_dump(),
+    )
+    record.created_at = "2000-01-01T00:00:00+00:00"
+    registry.save(record)
+
+    result = reserve_command_slot(registry=registry, user_id="user", session_id="session", audit_id="sandbox_run_123")
+
+    assert result.allowed is False
+    assert result.record.status == "guardrail_triggered"
+    assert result.record.guardrail == "max_duration_seconds"
+
+
 def test_reserve_command_slot_is_atomic_for_parallel_calls(tmp_path: Path) -> None:
     registry = SandboxRegistry(app_root=tmp_path)
     registry.save(
@@ -498,6 +545,46 @@ def test_workspace_paths_cannot_escape_sandbox_workspace(tmp_path: Path) -> None
         raise AssertionError("workspace_path accepted an escaping path")
 
 
+def test_workspace_write_policy_allows_only_generated_artifacts() -> None:
+    assert _workspace_write_target_error("output/extractor.py") == ""
+    assert _workspace_write_target_error("./output/final.json") == ""
+    assert _workspace_write_target_error("progress.json") == ""
+
+    blocked = _workspace_write_target_error("scripts/validate_outputs.py")
+    blocked_schema = _workspace_write_target_error("schemas/candidates.schema.json")
+    blocked_reference = _workspace_write_target_error("references/protocol.md")
+    blocked_input = _workspace_write_target_error("page.html")
+    blocked_escape = _workspace_write_target_error("../output/extractor.py")
+
+    assert "read-only by policy" in blocked
+    assert "read-only by policy" in blocked_schema
+    assert "read-only by policy" in blocked_reference
+    assert "read-only by policy" in blocked_input
+    assert "parent directory" in blocked_escape
+
+
+def test_sandbox_patch_rejects_read_only_helper_script_targets(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    helper = workspace / "scripts" / "validate_outputs.py"
+    helper.parent.mkdir(parents=True)
+    helper.write_text("old = True\n", encoding="utf-8")
+    record = SandboxSessionRecord(
+        app_name="job_scraper",
+        user_id="user",
+        session_id="session",
+        audit_id="sandbox_run_123",
+        container_id="container",
+        workspace_path=str(workspace),
+        status="running",
+    )
+
+    with pytest.raises(SandboxPatchError) as exc_info:
+        _apply_exact_workspace_replacement(record, "scripts/validate_outputs.py", "old = True", "old = False")
+
+    assert exc_info.value.error_type == "write_target_not_allowed"
+    assert helper.read_text(encoding="utf-8") == "old = True\n"
+
+
 def test_workspace_file_specs_accept_positional_page_artifacts(tmp_path: Path) -> None:
     page_file = tmp_path / "page.html"
     page_file.write_text("<html>jobs</html>", encoding="utf-8")
@@ -538,6 +625,7 @@ def test_sandbox_start_response_uses_docker_path_model_without_host_paths(
     assert "registry_path" not in payload
     assert "artifact_sources" not in payload
     assert record.workspace_path
+    assert record.limits["max_duration_seconds"] == 0
 
 
 def test_append_trace_writes_compact_jsonl(tmp_path: Path) -> None:
@@ -933,6 +1021,27 @@ def _write_minimal_protocol_files(output_dir: Path) -> None:
     files = {
         "page_profile.json": {"page_files": ["page.html"], "detected_layouts": ["test"], "warnings": []},
         "extraction_strategy.json": {"strategy": "test", "source_files": ["page.html"], "warnings": []},
+        "extraction_run.json": {
+            "observations": ["Observed one test job in the fixture workspace."],
+            "chosen_strategy": "test-fixture-accountable-extraction",
+            "extraction_steps": ["Wrote minimal protocol files for sandbox runtime tests."],
+            "expected_output": {
+                "expected_job_count": 1,
+                "count_basis": "test fixture setup",
+                "count_rationale": "The fixture contains exactly one in-scope test job.",
+                "available_fields": {
+                    "title": "required_observed",
+                    "company_name": "required_observed",
+                    "job_url": "required_observed",
+                },
+                "field_basis": {
+                    "title": "The fixture job object includes title.",
+                    "company_name": "The fixture job object includes company_name.",
+                    "job_url": "The fixture job object includes job_url.",
+                },
+            },
+            "validation": {"valid": True},
+        },
         "candidates.json": candidates,
         "validation.json": {"valid": True, "candidate_count": 1, "relevant_count": 1, "warnings": []},
         "final.json": {
@@ -945,3 +1054,8 @@ def _write_minimal_protocol_files(output_dir: Path) -> None:
     }
     for name, payload in files.items():
         (output_dir / name).write_text(json.dumps(payload, ensure_ascii=True, indent=2), encoding="utf-8")
+    (output_dir / "run_summary.md").write_text(
+        "The sandbox runtime test wrote accountable protocol files and reached validation/finalization "
+        "using a compact fixture-backed job payload.",
+        encoding="utf-8",
+    )
