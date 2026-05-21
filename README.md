@@ -105,6 +105,12 @@ sanitized snapshot and opens or updates a PR in
 repo secret `PUBLIC_REPO_SYNC_TOKEN`. Both repos need an initial `main` commit
 before the PR automation can run reliably.
 
+Release notes are maintained as per-PR fragments in `release-notes/unreleased/`.
+Every PR should add or update one fragment, including an explicit
+`No user-facing changes.` fragment for internal-only work. PR automation renders
+only fragments changed by that PR; `CHANGELOG.md` remains the cumulative release
+history.
+
 See [docs/03-public-export.md](/Users/tungnguyen/personal_projects/job_scraping/docs/03-public-export.md) for the full workflow.
 
 ## ADK Agent

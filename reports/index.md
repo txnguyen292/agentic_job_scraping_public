@@ -6,7 +6,8 @@ Planning documents and report templates live under `plans/`, not here.
 
 ## Current Artifacts
 
-No generated report artifacts yet.
+- `adk-eval-dashboard.html` can be generated from ADK eval history with:
+  `uv run python scripts/adk_eval_dashboard.py --input src/.adk/eval_history --output reports/adk-eval-dashboard.html`
 
 ## Conventions
 

@@ -21,6 +21,7 @@ include = [
   "plans/notes/**",
   "pyproject.toml",
   "public_export.toml",
+  "release-notes/**",
   "reports/index.md",
   "scripts/release_notes.py",
   "scripts/sync_public.py",

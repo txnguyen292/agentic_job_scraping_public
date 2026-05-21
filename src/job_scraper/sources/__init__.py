@@ -142,6 +142,10 @@ def _greenhouse_team(job_payload: Dict[str, Any]) -> str:
     return ""
 
 
+def _metadata_json(metadata: dict[str, Any], **dump_options: Any) -> str:
+    return json.dumps(metadata, sort_keys=dump_options.pop("sort_keys", True), **dump_options)
+
+
 def _normalize_greenhouse_job(source: SourceConfig, payload: Dict[str, Any]) -> NormalizedJob:
     description_text = strip_html(payload.get("content", ""))
     location_raw = ((payload.get("location") or {}).get("name") or "").strip()
@@ -179,7 +183,7 @@ def _normalize_greenhouse_job(source: SourceConfig, payload: Dict[str, Any]) -> 
         startup_score=startup_score,
         overall_score=overall_score,
         is_relevant=is_relevant,
-        metadata_json=json.dumps(metadata, sort_keys=True),
+        metadata_json=_metadata_json(metadata),
     )
 
 
@@ -221,7 +225,7 @@ def _normalize_lever_job(source: SourceConfig, payload: Dict[str, Any]) -> Norma
         startup_score=startup_score,
         overall_score=overall_score,
         is_relevant=is_relevant,
-        metadata_json=json.dumps(metadata, sort_keys=True),
+        metadata_json=_metadata_json(metadata),
     )
 
 
