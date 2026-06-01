@@ -12,6 +12,10 @@ import yaml
 
 
 CONTEXT_CLI_PATH = Path(".contexts/tools/context_cli.py")
+pytestmark = pytest.mark.skipif(
+    not CONTEXT_CLI_PATH.exists(),
+    reason="repo-local .contexts tooling is intentionally omitted from curated public snapshots",
+)
 
 
 def load_context_cli_module():
