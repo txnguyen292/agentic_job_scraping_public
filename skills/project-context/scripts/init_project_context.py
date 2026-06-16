@@ -24,6 +24,7 @@ TOKENS = {
 
 WRAPPER_COMMANDS = [
     "context_overview",
+    "linear_update_payload",
     "list_tasks",
     "list_decisions",
     "list_references",

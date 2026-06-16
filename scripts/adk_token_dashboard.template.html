@@ -1,0 +1,2306 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ADK Observability</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0f1117;
+        --rail: #111318;
+        --surface-low: #12151c;
+        --surface: #151923;
+        --surface-high: #1b202b;
+        --ink: #f4f6fb;
+        --muted: #9aa4b2;
+        --muted-strong: #c7ced8;
+        --line: #2b3340;
+        --line-strong: #4c586a;
+        --accent: #8b5cf6;
+        --accent-soft: rgba(139, 92, 246, 0.18);
+        --cyan: #38bdf8;
+        --green: #22c55e;
+        --amber: #f59e0b;
+        --rose: #fb7185;
+        --blue: #60a5fa;
+        --shadow: none;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        overflow-x: hidden;
+        min-height: 100%;
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: Inter, "Google Sans", Roboto, "Helvetica Neue", Arial, ui-sans-serif, system-ui, sans-serif;
+        letter-spacing: 0;
+      }
+
+      h1,
+      h2,
+      h3,
+      p {
+        margin: 0;
+      }
+
+      h1 {
+        font-size: 19px;
+        font-weight: 650;
+        line-height: 1.2;
+      }
+
+      h2 {
+        font-size: 15px;
+        font-weight: 650;
+        line-height: 1.25;
+      }
+
+      h3 {
+        font-size: 13px;
+        font-weight: 750;
+        line-height: 1.3;
+      }
+
+      button,
+      select {
+        font: inherit;
+      }
+
+      button {
+        cursor: pointer;
+      }
+
+      .shell {
+        display: grid;
+        grid-template-columns: 248px minmax(0, 1fr);
+        min-height: 100vh;
+        min-width: 0;
+      }
+
+      .shell > * {
+        min-width: 0;
+      }
+
+      .rail {
+        position: sticky;
+        top: 0;
+        min-width: 0;
+        height: 100vh;
+        border-right: 1px solid var(--line);
+        background: var(--rail);
+        padding: 12px;
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-height: 44px;
+        margin-bottom: 10px;
+        padding: 2px 8px 12px;
+      }
+
+      .mark {
+        display: inline-flex;
+        width: 28px;
+        height: 28px;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid #3a2b67;
+        border-radius: 6px;
+        background: #21183a;
+        color: #c4b5fd;
+        font-weight: 850;
+      }
+
+      .nav {
+        display: grid;
+        gap: 4px;
+      }
+
+      .nav button {
+        display: flex;
+        justify-content: space-between;
+        min-height: 40px;
+        align-items: center;
+        border: 1px solid transparent;
+        border-radius: 6px;
+        background: transparent;
+        color: var(--muted);
+        font-size: 13px;
+        font-weight: 600;
+        padding: 0 10px;
+        text-align: left;
+      }
+
+      .nav button:hover {
+        background: var(--surface-low);
+        color: var(--ink);
+      }
+
+      .nav button.is-active {
+        border-color: #3a2b67;
+        background: var(--accent-soft);
+        color: #ddd6fe;
+      }
+
+      .nav-count {
+        min-width: 20px;
+        color: var(--muted);
+        text-align: right;
+      }
+
+      .rail-note {
+        display: grid;
+        gap: 8px;
+        margin: 22px 12px 0;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      .topbar {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        min-width: 0;
+        border-bottom: 1px solid var(--line);
+        background: rgba(15, 17, 23, 0.96);
+        backdrop-filter: blur(12px);
+      }
+
+      .topbar-inner {
+        display: flex;
+        flex-wrap: wrap;
+        min-width: 0;
+        min-height: 58px;
+        align-items: center;
+        justify-content: space-between;
+        gap: 18px;
+        padding: 10px 20px;
+      }
+
+      main {
+        min-width: 0;
+        padding: 16px 20px 36px;
+      }
+
+      .page {
+        display: grid;
+        gap: 16px;
+        min-width: 0;
+      }
+
+      .grid {
+        display: grid;
+        gap: 14px;
+        min-width: 0;
+      }
+
+      .metric-grid {
+        grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
+      }
+
+      .two-col {
+        grid-template-columns: minmax(0, 1fr) minmax(min(320px, 100%), 0.62fr);
+        align-items: start;
+      }
+
+      .metrics-board {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(min(430px, 100%), 1fr));
+        gap: 14px;
+        align-items: start;
+        min-width: 0;
+      }
+
+      .metrics-board .wide {
+        grid-column: 1 / -1;
+      }
+
+      .session-detail-layout {
+        display: grid;
+        grid-template-columns: minmax(min(360px, 100%), 0.85fr) minmax(0, 1.15fr);
+        gap: 14px;
+        align-items: start;
+        min-width: 0;
+      }
+
+      .panel,
+      .card {
+        min-width: 0;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--surface);
+        box-shadow: var(--shadow);
+      }
+
+      .panel {
+        padding: 14px;
+      }
+
+      .collapsible-panel {
+        padding: 0;
+      }
+
+      .collapsible-panel summary {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 14px;
+        list-style: none;
+        cursor: pointer;
+        padding: 14px;
+      }
+
+      .collapsible-panel summary::-webkit-details-marker {
+        display: none;
+      }
+
+      .collapsible-panel summary:hover {
+        background: rgba(255, 255, 255, 0.02);
+      }
+
+      .collapsible-content {
+        display: grid;
+        gap: 10px;
+        min-width: 0;
+        max-height: min(560px, 62vh);
+        overflow: auto;
+        border-top: 1px solid var(--line);
+        padding: 14px;
+        scrollbar-color: var(--line-strong) transparent;
+      }
+
+      .collapsible-content > * {
+        min-width: 0;
+      }
+
+      .disclosure-icon {
+        display: inline-flex;
+        width: 24px;
+        height: 24px;
+        flex: 0 0 auto;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        color: var(--muted-strong);
+        font-size: 14px;
+        line-height: 1;
+        transition: transform 120ms ease;
+      }
+
+      details[open] .disclosure-icon {
+        transform: rotate(90deg);
+      }
+
+      .card {
+        display: grid;
+        gap: 8px;
+        padding: 12px;
+      }
+
+      .split {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .split > * {
+        min-width: 0;
+      }
+
+      .row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .stack {
+        display: grid;
+        gap: 10px;
+      }
+
+      .muted,
+      .microcopy {
+        color: var(--muted);
+      }
+
+      .microcopy {
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      .label {
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+      }
+
+      .big-number {
+        font-size: 25px;
+        font-weight: 650;
+        line-height: 1;
+      }
+
+      .pill {
+        display: inline-flex;
+        min-height: 26px;
+        align-items: center;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: var(--surface-low);
+        color: var(--ink);
+        font-size: 12px;
+        font-weight: 600;
+        padding: 0 10px;
+      }
+
+      .breadcrumb {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 7px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .breadcrumb strong {
+        color: var(--muted-strong);
+        font-weight: 600;
+      }
+
+      .project-summary {
+        display: grid;
+        gap: 14px;
+        min-width: 0;
+      }
+
+      .project-heading {
+        display: flex;
+        flex-wrap: wrap;
+        min-width: 0;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 16px;
+      }
+
+      .project-heading p {
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      .tablist {
+        display: flex;
+        gap: 18px;
+        border-bottom: 1px solid var(--line);
+        overflow-x: auto;
+      }
+
+      .tablist button {
+        position: relative;
+        min-height: 40px;
+        border: 0;
+        background: transparent;
+        color: var(--muted);
+        font-size: 13px;
+        font-weight: 650;
+        padding: 0 0 10px;
+      }
+
+      .tablist button.is-active {
+        color: var(--ink);
+      }
+
+      .tablist button.is-active::after {
+        content: "";
+        position: absolute;
+        right: 0;
+        bottom: -1px;
+        left: 0;
+        height: 2px;
+        border-radius: 999px;
+        background: var(--accent);
+      }
+
+      .project-controls {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .scope-bar {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        border: 1px solid #3a2b67;
+        border-radius: 8px;
+        background: var(--accent-soft);
+        padding: 10px 12px;
+      }
+
+      .scope-bar strong {
+        overflow-wrap: anywhere;
+      }
+
+      .ghost-button {
+        min-height: 30px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: var(--surface-low);
+        color: var(--muted-strong);
+        font-size: 12px;
+        font-weight: 650;
+        padding: 0 10px;
+      }
+
+      .ghost-button:hover {
+        border-color: var(--line-strong);
+        color: var(--ink);
+      }
+
+      .control-chip {
+        display: inline-flex;
+        max-width: 100%;
+        min-height: 30px;
+        align-items: center;
+        gap: 7px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: var(--surface-low);
+        color: var(--muted-strong);
+        font-size: 12px;
+        font-weight: 600;
+        padding: 0 10px;
+      }
+
+      .switch-dot {
+        width: 16px;
+        height: 16px;
+        border-radius: 999px;
+        background: var(--accent);
+        box-shadow: inset 0 0 0 4px #2b2146;
+      }
+
+      .source-path {
+        overflow-wrap: anywhere;
+        color: #93c5fd;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 11px;
+        line-height: 1.45;
+      }
+
+      .stacked-bar {
+        display: flex;
+        min-width: 160px;
+        height: 14px;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 3px;
+        background: #0b0e14;
+      }
+
+      .chart {
+        display: grid;
+        gap: 14px;
+      }
+
+      .chart-row {
+        display: grid;
+        grid-template-columns: minmax(150px, 240px) minmax(0, 1fr) minmax(84px, auto);
+        gap: 12px;
+        align-items: center;
+      }
+
+      .chart-label {
+        display: grid;
+        gap: 3px;
+        min-width: 0;
+      }
+
+      .chart-label strong,
+      .chart-note {
+        min-width: 0;
+        overflow: hidden;
+        overflow-wrap: anywhere;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .chart-note {
+        color: var(--muted);
+        font-size: 11px;
+        line-height: 1.35;
+      }
+
+      .chart-track {
+        position: relative;
+        min-height: 30px;
+        border-radius: 8px;
+        background: #0b0e14;
+        overflow: visible;
+      }
+
+      .chart-fill {
+        display: flex;
+        height: 30px;
+        min-width: 0;
+        overflow: hidden;
+        border-radius: 8px;
+      }
+
+      .chart-value {
+        color: var(--ink);
+        font-size: 12px;
+        font-weight: 800;
+        text-align: right;
+        white-space: nowrap;
+      }
+
+      .chart-axis {
+        display: flex;
+        justify-content: space-between;
+        border-top: 1px solid var(--line);
+        color: var(--muted);
+        font-size: 11px;
+        padding-top: 6px;
+      }
+
+      .segment-label {
+        display: inline-flex;
+        flex: 0 0 auto;
+        min-width: 0;
+        align-items: center;
+        justify-content: center;
+        color: #101216;
+        font-size: 10px;
+        font-weight: 850;
+        line-height: 1;
+        padding: 0;
+        white-space: nowrap;
+      }
+
+      .quantile-chart {
+        display: grid;
+        gap: 16px;
+      }
+
+      .quantile-row {
+        display: grid;
+        grid-template-columns: minmax(150px, 220px) minmax(0, 1fr);
+        gap: 12px;
+        align-items: center;
+      }
+
+      .quantile-track {
+        position: relative;
+        height: 38px;
+        border-radius: 8px;
+        background: #0b0d10;
+        overflow: visible;
+      }
+
+      .quantile-band {
+        position: absolute;
+        top: 13px;
+        height: 12px;
+        border-radius: 999px;
+        background: rgba(118, 215, 234, 0.28);
+      }
+
+      .quantile-marker {
+        position: absolute;
+        top: 5px;
+        display: block;
+        width: 18px;
+        height: 28px;
+        border-radius: 999px;
+        background: transparent;
+        cursor: help;
+        transform: translateX(-50%);
+      }
+
+      .quantile-marker::before {
+        content: "";
+        position: absolute;
+        left: 50%;
+        top: 0;
+        width: 2px;
+        height: 100%;
+        border-radius: 999px;
+        background: var(--cyan);
+        transform: translateX(-50%);
+      }
+
+      .quantile-marker.median::before {
+        background: var(--amber);
+      }
+
+      .hover-host {
+        cursor: help;
+      }
+
+      .chart-track.hover-host {
+        position: relative;
+      }
+
+      .quantile-marker.hover-host {
+        position: absolute;
+      }
+
+      .hover-tooltip {
+        position: absolute;
+        bottom: calc(100% + 8px);
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 40;
+        display: grid;
+        min-width: 220px;
+        max-width: min(280px, calc(100vw - 32px));
+        gap: 5px;
+        border: 1px solid var(--line-strong);
+        border-radius: 8px;
+        background: #0f1117;
+        box-shadow: 0 12px 32px rgba(0, 0, 0, 0.42);
+        color: var(--ink);
+        font-size: 11px;
+        line-height: 1.35;
+        opacity: 0;
+        padding: 10px;
+        pointer-events: none;
+        visibility: hidden;
+      }
+
+      .hover-tooltip strong {
+        font-size: 12px;
+      }
+
+      .hover-tooltip span {
+        color: var(--muted);
+      }
+
+      .hover-host:hover .hover-tooltip,
+      .hover-host:focus .hover-tooltip,
+      .hover-host:focus-within .hover-tooltip {
+        opacity: 1;
+        visibility: visible;
+      }
+
+      .quantile-caption {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        color: var(--muted);
+        font-size: 11px;
+        line-height: 1.35;
+      }
+
+      .call-quantile-card {
+        display: grid;
+        gap: 10px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #0b0e14;
+        padding: 12px;
+      }
+
+      .call-quantile-values {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .call-quantile-values div {
+        display: grid;
+        gap: 3px;
+      }
+
+      .bar-segment {
+        min-width: 0;
+        height: 100%;
+      }
+
+      .bar-cached {
+        background: var(--green);
+      }
+
+      .bar-noncached {
+        background: var(--amber);
+      }
+
+      .bar-output {
+        background: var(--blue);
+      }
+
+      .bar-thoughts {
+        background: var(--rose);
+      }
+
+      .legend-dot {
+        display: inline-block;
+        width: 9px;
+        height: 9px;
+        border-radius: 999px;
+      }
+
+      .timeline {
+        display: grid;
+        gap: 8px;
+      }
+
+      .timeline-row {
+        display: grid;
+        grid-template-columns: 120px minmax(0, 1fr) 110px;
+        gap: 12px;
+        align-items: center;
+      }
+
+      .table-wrap {
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+        overflow: auto;
+      }
+
+      .table-details {
+        min-width: 0;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(15, 23, 42, 0.22);
+      }
+
+      .table-details summary {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        min-width: 0;
+        cursor: pointer;
+        padding: 12px 14px;
+        list-style: none;
+      }
+
+      .table-details summary > * {
+        min-width: 0;
+      }
+
+      .table-details summary::-webkit-details-marker {
+        display: none;
+      }
+
+      .table-details[open] summary {
+        border-bottom: 1px solid var(--line);
+      }
+
+      .table-details .table-wrap {
+        max-height: 520px;
+        padding: 0 10px 10px;
+      }
+
+      .table {
+        width: 100%;
+        border-collapse: collapse;
+        min-width: 760px;
+      }
+
+      .table th,
+      .table td {
+        border-bottom: 1px solid var(--line);
+        padding: 10px 8px;
+        text-align: left;
+        vertical-align: top;
+      }
+
+      .table th {
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+      }
+
+      .table td.numeric,
+      .table th.numeric {
+        text-align: right;
+      }
+
+      .table tr.is-selected td {
+        background: rgba(139, 92, 246, 0.1);
+      }
+
+      .session-link {
+        display: grid;
+        gap: 4px;
+        width: 100%;
+        border: 0;
+        background: transparent;
+        color: var(--ink);
+        font: inherit;
+        padding: 0;
+        text-align: left;
+      }
+
+      .session-link strong {
+        color: #bfdbfe;
+        font-weight: 650;
+      }
+
+      .session-link:hover strong {
+        color: #ddd6fe;
+        text-decoration: underline;
+      }
+
+      .span-detail-row td {
+        background: rgba(11, 14, 20, 0.64);
+      }
+
+      .span-detail-panel {
+        display: grid;
+        gap: 12px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--surface-low);
+        padding: 12px;
+      }
+
+      .detail-kv-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .detail-kv {
+        display: grid;
+        gap: 3px;
+        min-width: 0;
+      }
+
+      .detail-kv span {
+        color: var(--muted);
+        font-size: 11px;
+        text-transform: uppercase;
+      }
+
+      .detail-kv strong {
+        overflow-wrap: anywhere;
+        font-size: 12px;
+        font-weight: 650;
+      }
+
+      .runtime-card {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--surface-low);
+        padding: 12px;
+      }
+
+      .empty {
+        border: 1px dashed var(--line);
+        border-radius: 8px;
+        color: var(--muted);
+        padding: 24px;
+        text-align: center;
+      }
+
+      @media (max-width: 1100px) {
+        .shell,
+        .two-col {
+          grid-template-columns: 1fr;
+        }
+
+        .rail,
+        .topbar {
+          position: static;
+        }
+
+        .rail {
+          height: auto;
+        }
+
+        .metric-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .metrics-board {
+          grid-template-columns: 1fr;
+        }
+
+        .session-detail-layout {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (max-width: 900px) {
+        .chart-row,
+        .quantile-row {
+          grid-template-columns: 1fr;
+        }
+
+        .chart-label strong,
+        .chart-note {
+          overflow: visible;
+          text-overflow: clip;
+          white-space: normal;
+        }
+
+        .chart-value {
+          text-align: left;
+        }
+
+        .topbar-inner {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        .topbar-inner > .row {
+          width: 100%;
+        }
+      }
+
+      @media (max-width: 640px) {
+        .shell {
+          display: block;
+        }
+
+        .rail {
+          padding: 10px;
+        }
+
+        .brand {
+          margin-bottom: 0;
+          padding-bottom: 8px;
+        }
+
+        .rail-note {
+          grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+          margin: 10px 8px 0;
+        }
+
+        main,
+        .topbar-inner {
+          padding-left: 14px;
+          padding-right: 14px;
+        }
+
+        .project-heading {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        .metric-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .timeline-row {
+          grid-template-columns: 1fr;
+        }
+
+        .collapsible-panel summary,
+        .table-details summary {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        .collapsible-content {
+          max-height: none;
+        }
+
+        .hover-tooltip {
+          min-width: min(220px, calc(100vw - 40px));
+          max-width: calc(100vw - 40px);
+        }
+
+        .table {
+          min-width: 680px;
+        }
+
+        .pill,
+        .control-chip,
+        .ghost-button {
+          min-height: 28px;
+          padding-right: 8px;
+          padding-left: 8px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="rail">
+        <div class="brand">
+          <span class="mark">A</span>
+          <div>
+            <h3>ADK Observability</h3>
+            <p class="microcopy">token metrics</p>
+          </div>
+        </div>
+        <nav class="nav" id="nav"></nav>
+        <div class="rail-note" id="rail-note"></div>
+      </aside>
+      <section>
+        <header class="topbar">
+          <div class="topbar-inner">
+            <div class="breadcrumb">
+              <span>Projects</span>
+              <span>/</span>
+              <strong id="page-title">adk-token-metrics</strong>
+            </div>
+            <div class="row" id="top-actions"></div>
+          </div>
+        </header>
+        <main id="app"></main>
+      </section>
+    </div>
+    <script id="dashboard-data" type="application/json">__TOKEN_DASHBOARD_DATA__</script>
+    <script>
+      const rawDashboardData = document.getElementById("dashboard-data")?.textContent.trim() || "";
+      const templateFallbackData = {
+        generated_at: new Date().toISOString(),
+        project_root: "",
+        source_dbs: [],
+        runtime_count: 0,
+        session_count: 0,
+        totals: {
+          llm_events: 0,
+          prompt_tokens: 0,
+          cached_tokens: 0,
+          noncached_prompt_tokens: 0,
+          output_tokens: 0,
+          thoughts_tokens: 0,
+          total_tokens: 0,
+          prompt_cost: 0,
+          cached_cost: 0,
+          noncached_prompt_cost: 0,
+          output_cost: 0,
+          thoughts_cost: 0,
+          total_cost: 0,
+        },
+        runtimes: [],
+        runtime_quantiles: [],
+        models: [],
+        sessions: [],
+        timeline: [],
+        live_processes: [],
+        source_label: "SQLite store(s)",
+        unit_label: "runtime DB",
+        unit_label_plural: "runtime DBs",
+        session_row_label: "Session",
+        sessions_description: "Most recent ADK sessions across discovered runtime DBs.",
+        quantile_title: "Runtime Quantiles",
+        quantile_description: "Q1, median, and Q3 are linear-interpolated across discovered runtime DB totals.",
+        distribution_title: "Runtime Distribution",
+        distribution_description: "Token mix by discovered ADK session store.",
+        model_buckets_title: "Runtime And Model Buckets",
+        model_buckets_description: "Models are grouped inside each runtime DB.",
+        notes: [
+          "This is the raw dashboard template. Generate the report with scripts/adk_token_dashboard.py or open the served/generated reports/adk-token-dashboard.html file.",
+        ],
+      };
+
+      function parseDashboardData() {
+        if (!rawDashboardData || rawDashboardData === "__TOKEN_DASHBOARD_DATA__") {
+          return templateFallbackData;
+        }
+        try {
+          return JSON.parse(rawDashboardData);
+        } catch (error) {
+          return {
+            ...templateFallbackData,
+            notes: [
+              `Dashboard data could not be parsed: ${error.message}`,
+              ...templateFallbackData.notes,
+            ],
+          };
+        }
+      }
+
+      window.__ADK_TOKEN_DASHBOARD_DATA__ = parseDashboardData();
+      const data = window.__ADK_TOKEN_DASHBOARD_DATA__;
+      const sourceLabel = data.source_label || "SQLite store(s)";
+      const unitLabel = data.unit_label || "runtime DB";
+      const unitLabelPlural = data.unit_label_plural || "runtime DBs";
+      const sessionRowLabel = data.session_row_label || "Session";
+      const views = [
+        ["sessions", "Sessions"],
+        ["overview", "Metrics"],
+        ["runtimes", "Runtimes"],
+        ["timeline", "Timeline"],
+      ];
+      const state = {
+        view: "sessions",
+        selectedSessionId: "",
+        selectedSpanId: "",
+      };
+
+      function esc(value) {
+        return String(value ?? "")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#039;");
+      }
+
+      function fmt(value) {
+        const number = Number(value || 0);
+        return new Intl.NumberFormat("en-US").format(number);
+      }
+
+      function compact(value) {
+        const number = Number(value || 0);
+        if (number >= 1_000_000) return `${(number / 1_000_000).toFixed(2)}M`;
+        if (number >= 1_000) return `${(number / 1_000).toFixed(1)}k`;
+        return fmt(number);
+      }
+
+      function money(value) {
+        const number = Number(value || 0);
+        if (number > 0 && number < 0.01) return "<$0.01";
+        return new Intl.NumberFormat("en-US", {
+          style: "currency",
+          currency: "USD",
+          maximumFractionDigits: number >= 1 ? 2 : 4,
+        }).format(number);
+      }
+
+      function percent(value) {
+        return `${Number(value || 0).toFixed(1)}%`;
+      }
+
+      function dateText(value) {
+        if (!value) return "n/a";
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return value;
+        return date.toLocaleString();
+      }
+
+      function pill(text) {
+        return `<span class="pill">${esc(text)}</span>`;
+      }
+
+      function metricCard(label, value, note) {
+        return `
+          <div class="card">
+            <div class="label">${esc(label)}</div>
+            <div class="big-number">${esc(value)}</div>
+            <p class="microcopy">${esc(note || "")}</p>
+          </div>
+        `;
+      }
+
+      function segmentStyle(value, total) {
+        const width = total ? (Number(value || 0) / total) * 100 : 0;
+        return `style="width: ${width}%"`;
+      }
+
+      function widthPct(value, max) {
+        if (!max) return 0;
+        return (Number(value || 0) / max) * 100;
+      }
+
+      function componentSegments(row, total, showLabels = true) {
+        const segments = [
+          ["bar-cached", row.cached_tokens, "cached"],
+          ["bar-noncached", row.noncached_prompt_tokens, "non-cached"],
+          ["bar-output", row.output_tokens, "output"],
+          ["bar-thoughts", row.thoughts_tokens, "thoughts"],
+        ];
+        return segments
+          .filter(([, value]) => Number(value || 0) > 0)
+          .map(([className, value]) => {
+            const pct = total ? (Number(value || 0) / total) * 100 : 0;
+            return `<span class="bar-segment segment-label ${className}" style="width: ${pct}%"></span>`;
+          })
+          .join("");
+      }
+
+      function costSegments(row, total) {
+        const segments = [
+          ["bar-output", Number(row.output_cost || 0) + Number(row.thoughts_cost || 0), "output cost"],
+          ["bar-noncached", row.prompt_cost, "input cost"],
+        ];
+        return segments
+          .filter(([, value]) => Number(value || 0) > 0)
+          .map(([className, value]) => {
+            const pct = total ? (Number(value || 0) / total) * 100 : 0;
+            return `<span class="bar-segment segment-label ${className}" style="width: ${pct}%"></span>`;
+          })
+          .join("");
+      }
+
+      function tokenTooltip(title, row, extra = "") {
+        return `
+          <div class="hover-tooltip">
+            <strong>${esc(title)}</strong>
+            ${extra ? `<span>${esc(extra)}</span>` : ""}
+            <span>Total: ${compact(row.total_tokens)}</span>
+            <span>Prompt: ${compact(row.prompt_tokens)}</span>
+            <span>Cached prompt: ${compact(row.cached_tokens)}</span>
+            <span>Non-cached prompt: ${compact(row.noncached_prompt_tokens)}</span>
+            <span>Output: ${compact(row.output_tokens)}</span>
+            <span>Thoughts: ${compact(row.thoughts_tokens)}</span>
+            <span>Cost: ${money(row.total_cost)}</span>
+            <span>LLM calls: ${fmt(row.llm_events)}</span>
+          </div>
+        `;
+      }
+
+      function costTooltip(title, row, extra = "") {
+        return `
+          <div class="hover-tooltip">
+            <strong>${esc(title)}</strong>
+            ${extra ? `<span>${esc(extra)}</span>` : ""}
+            <span>Total cost: ${money(row.total_cost)}</span>
+            <span>Input cost: ${money(row.prompt_cost)}</span>
+            <span>Cached input cost: ${money(row.cached_cost)}</span>
+            <span>Non-cached input cost: ${money(row.noncached_prompt_cost)}</span>
+            <span>Output cost: ${money(row.output_cost)}</span>
+            <span>Reasoning output cost: ${money(row.thoughts_cost)}</span>
+            <span>LLM calls: ${fmt(row.llm_events)}</span>
+          </div>
+        `;
+      }
+
+      function quantileTooltip(label, name, value, row, scaleNote) {
+        return `
+          <span class="hover-tooltip">
+            <strong>${esc(label)} ${esc(name)}</strong>
+            <span>${compact(value)}</span>
+            <span>Metric min: ${compact(row.min)}</span>
+            <span>Metric max: ${compact(row.max)}</span>
+            <span>${esc(scaleNote)}</span>
+          </span>
+        `;
+      }
+
+      function stackedBar(row) {
+        const total = Number(row.prompt_tokens || 0)
+          + Number(row.output_tokens || 0)
+          + Number(row.thoughts_tokens || 0);
+        return `
+          <div class="stacked-bar" title="cached input / non-cached input / output / reasoning">
+            <span class="bar-segment bar-cached" ${segmentStyle(row.cached_tokens, total)}></span>
+            <span class="bar-segment bar-noncached" ${segmentStyle(row.noncached_prompt_tokens, total)}></span>
+            <span class="bar-segment bar-output" ${segmentStyle(row.output_tokens, total)}></span>
+            <span class="bar-segment bar-thoughts" ${segmentStyle(row.thoughts_tokens, total)}></span>
+          </div>
+        `;
+      }
+
+      function annotatedTokenChart(rows, options = {}) {
+        if (!rows?.length) return `<div class="empty">No token usage found.</div>`;
+        const nameKey = options.nameKey || "runtime";
+        const max = Math.max(...rows.map((row) => Number(row.total_tokens || 0)), 0);
+        return `
+          <div class="chart">
+            ${rows.map((row) => {
+              const total = Number(row.total_tokens || 0);
+              const componentTotal = Number(row.prompt_tokens || 0)
+                + Number(row.output_tokens || 0)
+                + Number(row.thoughts_tokens || 0);
+              return `
+                <div class="chart-row">
+                  <div class="chart-label">
+                    <strong title="${esc(row[nameKey])}">${esc(row[nameKey])}</strong>
+                    <span class="chart-note">${esc(options.note ? options.note(row) : `${fmt(row.llm_events)} calls · ${percent(row.cache_pct_of_prompt)} prompt cached`)}</span>
+                  </div>
+                  <div class="chart-track hover-host" tabindex="0" aria-label="${esc(row[nameKey])} token details">
+                    <div class="chart-fill" style="width: ${widthPct(total, max)}%">
+                      ${componentSegments(row, componentTotal)}
+                    </div>
+                    ${tokenTooltip(row[nameKey], row, `${percent(row.pct_total)} of observed total`)}
+                  </div>
+                  <div class="chart-value">${compact(total)} <span class="muted">${percent(row.pct_total)}</span></div>
+                </div>
+              `;
+            }).join("")}
+            <div class="chart-axis">
+              <span>0</span>
+              <span>${esc(options.axisLabel || `${compact(max)} max total`)}</span>
+            </div>
+          </div>
+        `;
+      }
+
+      function annotatedCostChart(rows, options = {}) {
+        if (!rows?.length) return `<div class="empty">No cost data found.</div>`;
+        const nameKey = options.nameKey || "runtime";
+        const max = Math.max(...rows.map((row) => Number(row.total_cost || 0)), 0);
+        if (!max) return `<div class="empty">No cost available for these model rates.</div>`;
+        return `
+          <div class="chart">
+            ${rows.map((row) => {
+              const total = Number(row.total_cost || 0);
+              return `
+                <div class="chart-row">
+                  <div class="chart-label">
+                    <strong title="${esc(row[nameKey])}">${esc(row[nameKey])}</strong>
+                    <span class="chart-note">${esc(options.note ? options.note(row) : `${fmt(row.llm_events)} calls · ${money(row.output_cost)} output`)}</span>
+                  </div>
+                  <div class="chart-track hover-host" tabindex="0" aria-label="${esc(row[nameKey])} cost details">
+                    <div class="chart-fill" style="width: ${widthPct(total, max)}%">
+                      ${costSegments(row, total)}
+                    </div>
+                    ${costTooltip(row[nameKey], row, `${money(total)} cost`)}
+                  </div>
+                  <div class="chart-value">${money(total)}</div>
+                </div>
+              `;
+            }).join("")}
+            <div class="chart-axis">
+              <span>$0</span>
+              <span>${esc(options.axisLabel || `${money(max)} max cost`)}</span>
+            </div>
+          </div>
+        `;
+      }
+
+      function timelineBar(row, maxTotal) {
+        const scale = maxTotal ? Number(row.total_tokens || 0) / maxTotal : 0;
+        return `
+          <div style="width: ${scale * 100}%">
+            ${stackedBar(row)}
+          </div>
+        `;
+      }
+
+      function annotatedTimeline(rows) {
+        if (!rows?.length) return `<div class="empty">No timeline data.</div>`;
+        const max = Math.max(...rows.map((row) => Number(row.total_tokens || 0)), 0);
+        return `
+          <div class="chart">
+            ${rows.map((row) => {
+              const total = Number(row.total_tokens || 0);
+              const componentTotal = Number(row.prompt_tokens || 0)
+                + Number(row.output_tokens || 0)
+                + Number(row.thoughts_tokens || 0);
+              return `
+                <div class="chart-row">
+                  <div class="chart-label">
+                    <strong>${esc(row.date)}</strong>
+                    <span class="chart-note">${fmt(row.llm_events)} calls · ${compact(row.noncached_prompt_tokens)} non-cached</span>
+                  </div>
+                  <div class="chart-track hover-host" tabindex="0" aria-label="${esc(row.date)} token details">
+                    <div class="chart-fill" style="width: ${widthPct(total, max)}%">
+                      ${componentSegments(row, componentTotal, false)}
+                    </div>
+                    ${tokenTooltip(row.date, row)}
+                  </div>
+                  <div class="chart-value">${compact(total)}</div>
+                </div>
+              `;
+            }).join("")}
+            <div class="chart-axis">
+              <span>0</span>
+              <span>${compact(max)} peak day</span>
+            </div>
+          </div>
+        `;
+      }
+
+      function markerStyle(value, max) {
+        return `left: ${max ? Math.min(Math.max((Number(value || 0) / max) * 100, 0), 100) : 0}%`;
+      }
+
+      function quantileChart(rows) {
+        if (!rows?.length) return `<div class="empty">No runtime quantiles found.</div>`;
+        const tokenRows = rows.filter((row) => row.metric !== "llm_events");
+        const callRows = rows.filter((row) => row.metric === "llm_events");
+        const sharedTokenMax = Math.max(...tokenRows.map((row) => Number(row.max || 0)), 0);
+        const callRow = callRows[0];
+        return `
+          <div class="quantile-chart">
+            ${tokenRows.map((row) => {
+              const max = sharedTokenMax;
+              const rowMax = Number(row.max || 0);
+              const q1Pct = max ? (Number(row.q1 || 0) / max) * 100 : 0;
+              const q3Pct = max ? (Number(row.q3 || 0) / max) * 100 : 0;
+              const rowMaxPct = max ? (rowMax / max) * 100 : 0;
+              const scaleNote = `shared token scale max ${compact(max)}`;
+              return `
+                <div class="quantile-row">
+                  <div class="chart-label">
+                    <strong>${esc(row.label)}</strong>
+                  </div>
+                  <div class="stack">
+                    <div class="quantile-track">
+                      <span class="quantile-band" style="left: 0%; width: ${rowMaxPct}%"></span>
+                      <span class="quantile-band" style="left: ${q1Pct}%; width: ${Math.max(q3Pct - q1Pct, 0)}%"></span>
+                      <span class="quantile-marker hover-host" tabindex="0" style="${markerStyle(row.q1, max)}">${quantileTooltip(row.label, "Q1", row.q1, row, scaleNote)}</span>
+                      <span class="quantile-marker median hover-host" tabindex="0" style="${markerStyle(row.median, max)}">${quantileTooltip(row.label, "median", row.median, row, scaleNote)}</span>
+                      <span class="quantile-marker hover-host" tabindex="0" style="${markerStyle(row.q3, max)}">${quantileTooltip(row.label, "Q3", row.q3, row, scaleNote)}</span>
+                    </div>
+                  </div>
+                </div>
+              `;
+            }).join("")}
+            ${callRow ? `
+              <div class="call-quantile-card">
+                <div>
+                  <h3>LLM Call Quantiles</h3>
+                  <p class="microcopy">Separate unit from tokens, so it is shown as values instead of sharing the token chart.</p>
+                </div>
+                <div class="call-quantile-values">
+                  <div><span class="label">Q1</span><strong>${compact(callRow.q1)}</strong></div>
+                  <div><span class="label">Median</span><strong>${compact(callRow.median)}</strong></div>
+                  <div><span class="label">Q3</span><strong>${compact(callRow.q3)}</strong></div>
+                </div>
+                <p class="microcopy">Min ${compact(callRow.min)} · max ${compact(callRow.max)} calls across ${fmt(callRow.runtime_count)} ${esc(unitLabelPlural)}.</p>
+              </div>
+            ` : ""}
+          </div>
+        `;
+      }
+
+      function legend() {
+        return `
+          <div class="row microcopy">
+            <span><span class="legend-dot bar-cached"></span> cached input</span>
+            <span><span class="legend-dot bar-noncached"></span> non-cached input</span>
+            <span><span class="legend-dot bar-output"></span> output</span>
+            <span><span class="legend-dot bar-thoughts"></span> reasoning</span>
+          </div>
+        `;
+      }
+
+      function costLegend({ model = false } = {}) {
+        return `
+          <div class="row microcopy">
+            <span title="Cost for tokens generated by the model."><span class="legend-dot bar-output"></span> output cost</span>
+            <span title="Cost for tokens sent to the model."><span class="legend-dot bar-noncached"></span> input cost</span>
+          </div>
+        `;
+      }
+
+      function collapsibleTable({ title, subtitle = "", count = "", body, open = false }) {
+        return `
+          <details class="table-details" ${open ? "open" : ""}>
+            <summary>
+              <div>
+                <strong>${esc(title)}</strong>
+                ${subtitle ? `<p class="microcopy">${esc(subtitle)}</p>` : ""}
+              </div>
+              <div class="row">
+                ${count ? pill(count) : ""}
+                <span class="disclosure-icon" aria-hidden="true">›</span>
+              </div>
+            </summary>
+            ${body}
+          </details>
+        `;
+      }
+
+      function collapsiblePanel({ title, subtitle = "", count = "", body, open = true, wide = false }) {
+        return `
+          <details class="panel collapsible-panel ${wide ? "wide" : ""}" ${open ? "open" : ""}>
+            <summary>
+              <div>
+                <h2>${esc(title)}</h2>
+                ${subtitle ? `<p class="microcopy">${esc(subtitle)}</p>` : ""}
+              </div>
+              <div class="row">
+                ${count ? pill(count) : ""}
+                <span class="disclosure-icon" aria-hidden="true">›</span>
+              </div>
+            </summary>
+            <div class="collapsible-content">
+              ${body}
+            </div>
+          </details>
+        `;
+      }
+
+      function tokenTable(rows, options = {}) {
+        if (!rows.length) return `<div class="empty">No token usage found.</div>`;
+        const nameKey = options.nameKey || "runtime";
+        const nameLabel = options.nameLabel || "Runtime";
+        const includeTime = Boolean(options.includeTime);
+        const body = `
+          <div class="table-wrap">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>${esc(nameLabel)}</th>
+                  ${options.model ? "<th>Model</th>" : ""}
+                  <th class="numeric">LLM calls</th>
+                  <th class="numeric">Total</th>
+                  <th class="numeric">Cost</th>
+                  <th class="numeric">Prompt</th>
+                  <th class="numeric">Cached</th>
+                  <th class="numeric">Non-cached</th>
+                  <th class="numeric">Output</th>
+                  <th class="numeric">Thoughts</th>
+                  <th class="numeric">Cache %</th>
+                  <th>Mix</th>
+                  ${includeTime ? "<th>Ended</th>" : ""}
+                </tr>
+              </thead>
+              <tbody>
+                ${rows.map((row) => `
+                  <tr>
+                    <td>
+                      <div class="stack">
+                        <strong>${esc(row[nameKey])}</strong>
+                        ${row.db_path_display ? `<span class="source-path">${esc(row.db_path_display)}</span>` : ""}
+                      </div>
+                    </td>
+                    ${options.model ? `<td>${esc(row.model || "")}</td>` : ""}
+                    <td class="numeric">${fmt(row.llm_events)}</td>
+                    <td class="numeric">${compact(row.total_tokens)}</td>
+                    <td class="numeric">${money(row.total_cost)}</td>
+                    <td class="numeric">${compact(row.prompt_tokens)}</td>
+                    <td class="numeric">${compact(row.cached_tokens)}</td>
+                    <td class="numeric">${compact(row.noncached_prompt_tokens)}</td>
+                    <td class="numeric">${compact(row.output_tokens)}</td>
+                    <td class="numeric">${compact(row.thoughts_tokens)}</td>
+                    <td class="numeric">${percent(row.cache_pct_of_prompt)}</td>
+                    <td>${stackedBar(row)}</td>
+                    ${includeTime ? `<td>${esc(dateText(row.ended_at))}</td>` : ""}
+                  </tr>
+                `).join("")}
+              </tbody>
+            </table>
+          </div>
+        `;
+        if (options.collapsible === false) return body;
+        return collapsibleTable({
+          title: options.tableTitle || `${nameLabel} table`,
+          subtitle: options.tableSubtitle || "Detailed token, cost, and cache rows.",
+          count: `${fmt(rows.length)} row${rows.length === 1 ? "" : "s"}`,
+          body,
+          open: Boolean(options.open),
+        });
+      }
+
+      function rowIdentity(row) {
+        return String(row?.session_id || row?.db_path || row?.runtime || "");
+      }
+
+      function spanIdentity(row) {
+        return String(row?.db_path || row?.runtime || row?.trace_id || "");
+      }
+
+      function sessionChildRows(session) {
+        const id = rowIdentity(session);
+        if (!id) return [];
+        return (data.runtimes || []).filter((row) => {
+          return String(row.session_id || "") === id
+            || String(row.trace_id || "") === id
+            || String(row.db_path || "") === id;
+        });
+      }
+
+      function selectedSession() {
+        if (!state.selectedSessionId) return null;
+        return (data.sessions || []).find((row) => rowIdentity(row) === state.selectedSessionId) || null;
+      }
+
+      function blankCounter() {
+        return {
+          llm_events: 0,
+          prompt_tokens: 0,
+          cached_tokens: 0,
+          noncached_prompt_tokens: 0,
+          output_tokens: 0,
+          thoughts_tokens: 0,
+          total_tokens: 0,
+          prompt_cost: 0,
+          cached_cost: 0,
+          noncached_prompt_cost: 0,
+          output_cost: 0,
+          thoughts_cost: 0,
+          total_cost: 0,
+        };
+      }
+
+      function addCounter(target, row) {
+        Object.keys(blankCounter()).forEach((key) => {
+          target[key] = Number(target[key] || 0) + Number(row?.[key] || 0);
+        });
+        return target;
+      }
+
+      function enrichScopedRow(row, totalTokens) {
+        return {
+          ...row,
+          cache_pct_of_prompt: row.prompt_tokens ? (Number(row.cached_tokens || 0) / Number(row.prompt_tokens || 0)) * 100 : 0,
+          pct_total: totalTokens ? (Number(row.total_tokens || 0) / totalTokens) * 100 : 0,
+        };
+      }
+
+      function aggregateRows(rows, meta = {}) {
+        const total = rows.reduce((acc, row) => addCounter(acc, row), blankCounter());
+        return enrichScopedRow({ ...meta, ...total }, total.total_tokens);
+      }
+
+      function dateBucket(row) {
+        const raw = row?.ended_at || row?.started_at || row?.date || "";
+        const parsed = raw ? new Date(raw) : null;
+        if (parsed && !Number.isNaN(parsed.getTime())) return parsed.toISOString().slice(0, 10);
+        return String(raw || "unknown").slice(0, 10) || "unknown";
+      }
+
+      function groupScopedRows(rows, keyFn, metaFn) {
+        const groups = new Map();
+        rows.forEach((row) => {
+          const key = keyFn(row) || "unknown";
+          if (!groups.has(key)) groups.set(key, { key, rows: [], meta: metaFn(row, key) });
+          groups.get(key).rows.push(row);
+        });
+        const total = aggregateRows(rows).total_tokens;
+        return Array.from(groups.values())
+          .map((group) => enrichScopedRow(aggregateRows(group.rows, group.meta), total))
+          .sort((a, b) => Number(b.total_tokens || 0) - Number(a.total_tokens || 0));
+      }
+
+      function quantileValue(values, q) {
+        const sorted = values.map(Number).filter((value) => Number.isFinite(value)).sort((a, b) => a - b);
+        if (!sorted.length) return 0;
+        if (sorted.length === 1) return sorted[0];
+        const pos = (sorted.length - 1) * q;
+        const lower = Math.floor(pos);
+        const upper = Math.ceil(pos);
+        if (lower === upper) return sorted[lower];
+        return sorted[lower] + (sorted[upper] - sorted[lower]) * (pos - lower);
+      }
+
+      function buildScopedQuantiles(rows) {
+        const metrics = [
+          ["total_tokens", "Total tokens"],
+          ["prompt_tokens", "Prompt tokens"],
+          ["cached_tokens", "Cached prompt"],
+          ["noncached_prompt_tokens", "Non-cached prompt"],
+          ["output_tokens", "Output tokens"],
+          ["thoughts_tokens", "Thought tokens"],
+          ["llm_events", "LLM calls"],
+        ];
+        return metrics.map(([metric, label]) => {
+          const values = rows.map((row) => Number(row[metric] || 0));
+          return {
+            metric,
+            label,
+            q1: quantileValue(values, 0.25),
+            median: quantileValue(values, 0.5),
+            q3: quantileValue(values, 0.75),
+            min: values.length ? Math.min(...values) : 0,
+            max: values.length ? Math.max(...values) : 0,
+            runtime_count: rows.length,
+          };
+        });
+      }
+
+      function scopedDashboardData() {
+        const session = selectedSession();
+        if (!session) return { ...data, scope_session: null, scope_active: false };
+        const childRows = sessionChildRows(session);
+        const rawRows = childRows.length ? childRows : [session];
+        const totals = aggregateRows(rawRows);
+        const rows = rawRows
+          .map((row) => enrichScopedRow(row, totals.total_tokens))
+          .sort((a, b) => Number(b.total_tokens || 0) - Number(a.total_tokens || 0));
+        const models = groupScopedRows(rows, (row) => row.model || "unknown", (row, model) => ({
+          runtime: session.session_id || session.runtime || "selected session",
+          model,
+        }));
+        const timeline = groupScopedRows(rows, dateBucket, (row, date) => ({ date }));
+        return {
+          ...data,
+          scope_active: true,
+          scope_session: session,
+          runtimes: rows,
+          runtime_count: rows.length,
+          session_count: 1,
+          totals,
+          models,
+          timeline,
+          runtime_quantiles: buildScopedQuantiles(rows),
+          notes: [
+            `Filtered to selected session ${session.session_id || session.runtime || rowIdentity(session)}.`,
+            ...(data.notes || []),
+          ],
+        };
+      }
+
+      function sessionTable(rows, selectedId) {
+        if (!rows.length) return `<div class="empty">No sessions found.</div>`;
+        const body = `
+          <div class="table-wrap">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>${esc(sessionRowLabel)}</th>
+                  <th>Model</th>
+                  <th class="numeric">LLM calls</th>
+                  <th class="numeric">Total</th>
+                  <th class="numeric">Cost</th>
+                  <th class="numeric">Cached</th>
+                  <th class="numeric">Cache %</th>
+                  <th>Mix</th>
+                  <th>Ended</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${rows.map((row) => {
+                  const id = rowIdentity(row);
+                  return `
+                    <tr class="${id === selectedId ? "is-selected" : ""}">
+                      <td>
+                        <button class="session-link" type="button" data-session-id="${esc(id)}">
+                          <strong>${esc(row.session_id || row.runtime || id)}</strong>
+                          ${row.db_path_display ? `<span class="source-path">${esc(row.db_path_display)}</span>` : ""}
+                        </button>
+                      </td>
+                      <td>${esc(row.model || "")}</td>
+                      <td class="numeric">${fmt(row.llm_events)}</td>
+                      <td class="numeric">${compact(row.total_tokens)}</td>
+                      <td class="numeric">${money(row.total_cost)}</td>
+                      <td class="numeric">${compact(row.cached_tokens)}</td>
+                      <td class="numeric">${percent(row.cache_pct_of_prompt)}</td>
+                      <td>${stackedBar(row)}</td>
+                      <td>${esc(dateText(row.ended_at))}</td>
+                    </tr>
+                  `;
+                }).join("")}
+              </tbody>
+            </table>
+          </div>
+        `;
+        return collapsibleTable({
+          title: "Session table",
+          subtitle: "Click a row to make that session the active dashboard context.",
+          count: `${fmt(rows.length)} session${rows.length === 1 ? "" : "s"}`,
+          body,
+          open: true,
+        });
+      }
+
+      function spanDetailPanel(row) {
+        return `
+          <div class="span-detail-panel">
+            <div class="grid metric-grid">
+              ${metricCard("Cost", money(row.total_cost), `${money(row.prompt_cost)} input · ${money(row.output_cost + row.thoughts_cost)} output`)}
+              ${metricCard("Prompt", compact(row.prompt_tokens), `${compact(row.cached_tokens)} cached`)}
+              ${metricCard("Non-Cached", compact(row.noncached_prompt_tokens), `${percent(row.cache_pct_of_prompt)} prompt cached`)}
+              ${metricCard("Output", compact(row.output_tokens), `${compact(row.thoughts_tokens)} thoughts`)}
+              ${metricCard("LLM Calls", fmt(row.llm_events), row.model || "unknown model")}
+            </div>
+            <div class="detail-kv-grid">
+              <div class="detail-kv"><span>Model</span><strong>${esc(row.model || "unknown")}</strong></div>
+              <div class="detail-kv"><span>Trace</span><strong>${esc(row.trace_id || row.db_path_display || "unknown")}</strong></div>
+              <div class="detail-kv"><span>Span</span><strong>${esc(row.db_path || "unknown")}</strong></div>
+              <div class="detail-kv"><span>Session</span><strong>${esc(row.session_id || "unknown")}</strong></div>
+              <div class="detail-kv"><span>Started</span><strong>${esc(dateText(row.started_at))}</strong></div>
+              <div class="detail-kv"><span>Ended</span><strong>${esc(dateText(row.ended_at))}</strong></div>
+            </div>
+          </div>
+        `;
+      }
+
+      function spanDetailsTable(rows) {
+        if (!rows.length) return `<div class="empty">No LLM spans found.</div>`;
+        const body = `
+          <div class="table-wrap">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>${esc(unitLabel)}</th>
+                  <th>Model</th>
+                  <th class="numeric">Total</th>
+                  <th class="numeric">Cost</th>
+                  <th class="numeric">Prompt</th>
+                  <th class="numeric">Cached</th>
+                  <th class="numeric">Output</th>
+                  <th>Mix</th>
+                  <th>Ended</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${rows.map((row) => {
+                  const id = spanIdentity(row);
+                  const selected = id && id === state.selectedSpanId;
+                  return `
+                    <tr class="${selected ? "is-selected" : ""}">
+                      <td>
+                        <button class="session-link" type="button" data-span-id="${esc(id)}">
+                          <strong>${esc(row.runtime || id)}</strong>
+                          ${row.db_path_display ? `<span class="source-path">${esc(row.db_path_display)}</span>` : ""}
+                        </button>
+                      </td>
+                      <td>${esc(row.model || "")}</td>
+                      <td class="numeric">${compact(row.total_tokens)}</td>
+                      <td class="numeric">${money(row.total_cost)}</td>
+                      <td class="numeric">${compact(row.prompt_tokens)}</td>
+                      <td class="numeric">${compact(row.cached_tokens)}</td>
+                      <td class="numeric">${compact(row.output_tokens)}</td>
+                      <td>${stackedBar(row)}</td>
+                      <td>${esc(dateText(row.ended_at))}</td>
+                    </tr>
+                    ${selected ? `
+                      <tr class="span-detail-row">
+                        <td colspan="9">${spanDetailPanel(row)}</td>
+                      </tr>
+                    ` : ""}
+                  `;
+                }).join("")}
+              </tbody>
+            </table>
+          </div>
+        `;
+        return collapsibleTable({
+          title: "ChatCompletion table",
+          subtitle: "Click a row to expand token, cost, model, session, and timing details.",
+          count: `${fmt(rows.length)} ${unitLabelPlural}`,
+          body,
+          open: Boolean(state.selectedSpanId),
+        });
+      }
+
+      function sessionDetail(session) {
+        if (!session) return `<div class="empty">Select a session to inspect its details.</div>`;
+        const children = sessionChildRows(session);
+        const detailRows = children.length ? children : [session];
+        const detailMax = Math.max(...detailRows.map((row) => Number(row.total_tokens || 0)), 0);
+        if (!detailRows.some((row) => spanIdentity(row) === state.selectedSpanId)) {
+          state.selectedSpanId = "";
+        }
+        return `
+          <section class="panel stack" id="selected-session-detail">
+            <div class="split">
+              <div>
+                <h2>${esc(session.session_id || session.runtime || "Selected session")}</h2>
+                <p class="microcopy">${esc(session.db_path_display || `${fmt(detailRows.length)} ${unitLabelPlural}`)}</p>
+              </div>
+              ${pill(`${compact(session.total_tokens)} tokens`)}
+              ${pill(`${money(session.total_cost)} cost`)}
+            </div>
+            <div class="grid metric-grid">
+              ${metricCard("Cost", money(session.total_cost), `${money(session.noncached_prompt_cost)} non-cached input`)}
+              ${metricCard("Prompt", compact(session.prompt_tokens), `${compact(session.cached_tokens)} cached`)}
+              ${metricCard("Non-Cached", compact(session.noncached_prompt_tokens), `${percent(session.cache_pct_of_prompt)} prompt cached`)}
+              ${metricCard("Output", compact(session.output_tokens), `${compact(session.thoughts_tokens)} thoughts`)}
+              ${metricCard("LLM Calls", fmt(session.llm_events), `${fmt(detailRows.length)} detail row(s)`)}
+            </div>
+            <details class="panel collapsible-panel">
+              <summary>
+                <div>
+                  <h3>LLM Span Details</h3>
+                  <p class="microcopy">Token mix for the selected session's underlying LLM spans.</p>
+                </div>
+                <div class="row">
+                  ${pill(`${fmt(detailRows.length)} ${unitLabelPlural}`)}
+                  <span class="disclosure-icon" aria-hidden="true">›</span>
+                </div>
+              </summary>
+              <div class="collapsible-content">
+                ${legend()}
+                ${annotatedTokenChart(detailRows, {
+                  nameKey: "runtime",
+                  note: (row) => `${row.model || "unknown"} · ${fmt(row.llm_events)} calls · ${percent(row.cache_pct_of_prompt)} prompt cached`,
+                  axisLabel: `${compact(detailMax)} max selected span`,
+                })}
+                ${spanDetailsTable(detailRows)}
+              </div>
+            </details>
+          </section>
+        `;
+      }
+
+      function quantileTable(rows) {
+        if (!rows?.length) return `<div class="empty">No runtime quantiles found.</div>`;
+        const body = `
+          <div class="table-wrap">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>Metric</th>
+                  <th class="numeric">Q1</th>
+                  <th class="numeric">Median</th>
+                  <th class="numeric">Q3</th>
+                  <th class="numeric">Min</th>
+                  <th class="numeric">Max</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${rows.map((row) => `
+                  <tr>
+                    <td><strong>${esc(row.label)}</strong></td>
+                    <td class="numeric">${compact(row.q1)}</td>
+                    <td class="numeric">${compact(row.median)}</td>
+                    <td class="numeric">${compact(row.q3)}</td>
+                    <td class="numeric">${compact(row.min)}</td>
+                    <td class="numeric">${compact(row.max)}</td>
+                  </tr>
+                `).join("")}
+              </tbody>
+            </table>
+          </div>
+        `;
+        return collapsibleTable({
+          title: "Quantile table",
+          subtitle: "Q1, median, Q3, min, and max values for each metric.",
+          count: `${fmt(rows.length)} metrics`,
+          body,
+        });
+      }
+
+      function renderNav() {
+        document.getElementById("nav").innerHTML = "";
+      }
+
+      function renderRail(dashboard = data) {
+        document.getElementById("rail-note").innerHTML = `
+          <p>${dashboard.scope_active ? "Selected session" : "All sessions"}</p>
+          <p>${fmt(dashboard.runtime_count)} ${esc(unitLabelPlural)}</p>
+          <p>${fmt(dashboard.session_count)} sessions</p>
+          <p>${fmt(dashboard.totals.llm_events)} LLM events</p>
+          <p class="source-path">${esc(dashboard.project_root)}</p>
+        `;
+      }
+
+      function renderTop(dashboard = data) {
+        document.getElementById("top-actions").innerHTML = `
+          ${dashboard.scope_active ? pill("selected session") : ""}
+          ${pill(`${compact(dashboard.totals.total_tokens)} total tokens`)}
+          ${pill(`${money(dashboard.totals.total_cost)} cost`)}
+          ${pill(`${compact(dashboard.totals.noncached_prompt_tokens)} non-cached prompt`)}
+        `;
+      }
+
+      function renderTabs() {
+        return `
+          <div class="tablist" role="tablist" aria-label="Token dashboard views">
+            ${views.map(([id, label]) => `
+              <button
+                class="${state.view === id ? "is-active" : ""}"
+                type="button"
+                role="tab"
+                aria-selected="${state.view === id ? "true" : "false"}"
+                data-view="${id}"
+              >${esc(label)}</button>
+            `).join("")}
+          </div>
+        `;
+      }
+
+      function renderScopeBar(dashboard = data) {
+        if (!dashboard.scope_active || !dashboard.scope_session) return "";
+        const session = dashboard.scope_session;
+        return `
+          <div class="scope-bar">
+            <div class="stack">
+              <span class="label">Viewing selected session</span>
+              <strong>${esc(session.session_id || session.runtime || rowIdentity(session))}</strong>
+              <p class="microcopy">Metrics, Runtimes, and Timeline are filtered to this session. Sessions keeps the full list so you can switch context.</p>
+            </div>
+            <button class="ghost-button" type="button" data-clear-session-scope>Clear</button>
+          </div>
+        `;
+      }
+
+      function renderProjectSummary(dashboard = data) {
+        return `
+          <section class="project-summary">
+            <div class="project-heading">
+              <div>
+                <h1>ADK Observability</h1>
+                <p>Generated ${dateText(dashboard.generated_at)} from ${dashboard.source_dbs.length} ${esc(sourceLabel)}.</p>
+              </div>
+              <div class="project-controls">
+                <span class="control-chip"><span class="switch-dot"></span> Stream</span>
+                <span class="control-chip">Last 7 Days</span>
+                ${dashboard.scope_active ? pill("selected session") : ""}
+                ${pill(`${fmt(dashboard.runtime_count)} ${unitLabelPlural}`)}
+                ${pill(`${fmt(dashboard.session_count)} sessions`)}
+              </div>
+            </div>
+            <div class="grid metric-grid">
+              ${metricCard("Total Tokens", compact(dashboard.totals.total_tokens), dashboard.scope_active ? "Selected session total" : "ADK total_token_count sum")}
+              ${metricCard("Cost", money(dashboard.totals.total_cost), dashboard.cost_note || "Calculated locally from token buckets")}
+              ${metricCard("Prompt Tokens", compact(dashboard.totals.prompt_tokens), `${compact(dashboard.totals.cached_tokens)} cached`)}
+              ${metricCard("Output Tokens", compact(dashboard.totals.output_tokens), `${compact(dashboard.totals.thoughts_tokens)} thoughts reported separately`)}
+              ${metricCard("LLM Calls", fmt(dashboard.totals.llm_events), `${fmt(dashboard.session_count)} sessions across ${fmt(dashboard.runtime_count)} ${unitLabelPlural}`)}
+            </div>
+            ${renderTabs()}
+            ${renderScopeBar(dashboard)}
+          </section>
+        `;
+      }
+
+      function renderModelCostPanel(modelCostMax, dashboard = data) {
+        if ((dashboard.models || []).length <= 1) return "";
+        return collapsiblePanel({
+          title: "Top models by cost",
+          subtitle: "Cost by model",
+          count: `${fmt(dashboard.models.length)} model${dashboard.models.length === 1 ? "" : "s"}`,
+          body: `
+            ${costLegend({ model: true })}
+            ${annotatedCostChart(dashboard.models, {
+              nameKey: "model",
+              note: (row) => `${row.runtime} · ${fmt(row.llm_events)} calls · ${money(row.prompt_cost)} input`,
+              axisLabel: `${money(modelCostMax)} max model cost`,
+            })}
+          `,
+        });
+      }
+
+      function renderOverview(dashboard = data) {
+        const topRuntime = dashboard.runtimes[0];
+        const topModel = dashboard.models[0];
+        const modelMax = Math.max(...dashboard.models.map((row) => Number(row.total_tokens || 0)), 0);
+        const modelCostMax = Math.max(...dashboard.models.map((row) => Number(row.total_cost || 0)), 0);
+        return `
+          <div class="metrics-board">
+            ${collapsiblePanel({
+              title: "Cost",
+              subtitle: "Input cost is tokens sent to the model; output cost is tokens generated by the model.",
+              count: money(dashboard.totals.total_cost),
+              body: `
+                ${(dashboard.models || []).length === 1 ? `<p class="microcopy">Single model: ${esc(dashboard.models[0].model || "unknown")}</p>` : ""}
+              ${costLegend()}
+              ${annotatedCostChart(dashboard.timeline, {
+                nameKey: "date",
+                note: (row) => `${fmt(row.llm_events)} calls · ${money(row.prompt_cost)} input`,
+                axisLabel: `${money(Math.max(...dashboard.timeline.map((row) => Number(row.total_cost || 0)), 0))} peak day`,
+              })}
+              `,
+            })}
+            ${renderModelCostPanel(modelCostMax, dashboard)}
+            ${collapsiblePanel({
+              title: "Token usage",
+              subtitle: "Token usage by cached prompt, non-cached prompt, output, and thoughts.",
+              count: `${compact(dashboard.totals.total_tokens)} tokens`,
+              body: `
+                ${legend()}
+              ${annotatedTimeline(dashboard.timeline)}
+              `,
+            })}
+            ${collapsiblePanel({
+              title: "Top models by tokens",
+              subtitle: dashboard.scope_active ? "Models are grouped inside the selected session." : (dashboard.model_buckets_description || "Models are grouped inside each runtime DB."),
+              count: `${fmt(dashboard.models.length)} model${dashboard.models.length === 1 ? "" : "s"}`,
+              body: `
+                ${legend()}
+              ${annotatedTokenChart(dashboard.models, {
+                nameKey: "model",
+                note: (row) => `${row.runtime} · ${fmt(row.llm_events)} calls · ${percent(row.cache_pct_of_prompt)} prompt cached`,
+                axisLabel: `${compact(modelMax)} max model bucket`,
+              })}
+              `,
+            })}
+            <details class="panel collapsible-panel wide">
+              <summary>
+                <div>
+                  <h2>${esc(dashboard.distribution_title || "Runtime Distribution")}</h2>
+                  <p class="microcopy">${esc(dashboard.scope_active ? "Token mix for LLM spans inside the selected session." : (dashboard.distribution_description || "Token mix by discovered ADK session store."))}</p>
+                </div>
+                <div class="row">
+                  ${pill(`${fmt(dashboard.runtimes.length)} ${unitLabelPlural}`)}
+                  <span class="disclosure-icon" aria-hidden="true">›</span>
+                </div>
+              </summary>
+              <div class="collapsible-content">
+                ${legend()}
+                ${annotatedTokenChart(dashboard.runtimes)}
+                <div class="stack">
+                  <div>
+                    <h3>ChatCompletion Details</h3>
+                    <p class="microcopy">Click a ChatCompletion row to expand token, cost, trace, span, session, and timing details.</p>
+                  </div>
+                  ${spanDetailsTable(dashboard.runtimes)}
+                </div>
+              </div>
+            </details>
+            <section class="panel stack">
+              <div>
+                <h2>${esc(dashboard.quantile_title || "Runtime Quantiles")}</h2>
+                <p class="microcopy">${esc(dashboard.scope_active ? "Q1, median, and Q3 are calculated across LLM spans inside the selected session." : (dashboard.quantile_description || "Q1, median, and Q3 are linear-interpolated across discovered runtime DB totals."))}</p>
+              </div>
+              ${quantileChart(dashboard.runtime_quantiles)}
+            </section>
+            <section class="panel stack">
+              <h2>Read</h2>
+              <div class="runtime-card stack">
+                <div class="label">Largest ${esc(unitLabel)}</div>
+                <strong>${esc(topRuntime?.runtime || "n/a")}</strong>
+                <p class="microcopy">${topRuntime ? `${percent(topRuntime.pct_total)} of observed total tokens.` : ""}</p>
+              </div>
+              <div class="runtime-card stack">
+                <div class="label">Largest model bucket</div>
+                <strong>${esc(topModel ? `${topModel.runtime} / ${topModel.model}` : "n/a")}</strong>
+                <p class="microcopy">${topModel ? `${compact(topModel.total_tokens)} tokens across ${fmt(topModel.llm_events)} LLM events.` : ""}</p>
+              </div>
+              <div class="stack">
+                ${(dashboard.notes || []).map((note) => `<p class="microcopy">${esc(note)}</p>`).join("")}
+              </div>
+            </section>
+          </div>
+        `;
+      }
+
+      function renderRuntimes(dashboard = data) {
+        return `
+          <div class="page">
+            ${collapsiblePanel({
+              title: dashboard.scope_active ? "Selected Session Model Buckets" : (dashboard.model_buckets_title || "Runtime And Model Buckets"),
+              subtitle: dashboard.scope_active ? "Models are grouped from LLM spans in the selected session." : (dashboard.model_buckets_description || "Models are grouped inside each runtime DB."),
+              count: `${fmt(dashboard.models.length)} model${dashboard.models.length === 1 ? "" : "s"}`,
+              body: `
+                ${legend()}
+              ${annotatedTokenChart(dashboard.models, {
+                nameKey: "model",
+                note: (row) => `${row.runtime} · ${fmt(row.llm_events)} calls · ${percent(row.cache_pct_of_prompt)} prompt cached`,
+                axisLabel: `${compact(Math.max(...dashboard.models.map((row) => Number(row.total_tokens || 0)), 0))} max model bucket`,
+              })}
+              `,
+            })}
+            ${collapsiblePanel({
+              title: dashboard.scope_active ? "Selected Session LLM Spans" : (data.distribution_title || "Runtime Distribution"),
+              subtitle: dashboard.scope_active ? "Each row is an LLM span from the selected session." : (data.distribution_description || "Token mix by discovered ADK session store."),
+              count: `${fmt(dashboard.runtimes.length)} ${unitLabelPlural}`,
+              body: `
+                ${legend()}
+              ${tokenTable(dashboard.runtimes, {
+                nameKey: "runtime",
+                nameLabel: dashboard.scope_active ? unitLabel : "Runtime",
+                model: true,
+                includeTime: true,
+                open: true,
+              })}
+              `,
+            })}
+            <section class="panel stack">
+              <h2>Detected ADK Web Processes</h2>
+              ${data.live_processes.length ? `
+                ${collapsibleTable({
+                  title: "Process table",
+                  subtitle: "Local adk web processes seen when this report was generated.",
+                  count: `${fmt(data.live_processes.length)} process${data.live_processes.length === 1 ? "" : "es"}`,
+                  body: `
+                    <div class="table-wrap">
+                      <table class="table">
+                        <thead><tr><th>PID</th><th>Elapsed</th><th>Started</th><th>Command</th></tr></thead>
+                        <tbody>
+                          ${data.live_processes.map((row) => `
+                            <tr>
+                              <td>${esc(row.pid)}</td>
+                              <td>${esc(row.elapsed)}</td>
+                              <td>${esc(row.started)}</td>
+                              <td class="source-path">${esc(row.command)}</td>
+                            </tr>
+                          `).join("")}
+                        </tbody>
+                      </table>
+                    </div>
+                  `,
+                  open: true,
+                })}
+              ` : `<div class="empty">No live adk web process detected when the report was generated.</div>`}
+            </section>
+          </div>
+        `;
+      }
+
+      function renderSessions() {
+        const sessions = data.sessions.slice(0, 80);
+        const scopedSession = selectedSession();
+        const selectedId = scopedSession ? rowIdentity(scopedSession) : "";
+        return `
+          <div class="session-detail-layout">
+            <section class="panel stack">
+              <div class="split">
+                <div>
+                  <h2>Recent ${esc(sessionRowLabel)}s</h2>
+                  <p class="microcopy">${esc(data.sessions_description || "Most recent ADK sessions across discovered runtime DBs.")}</p>
+                </div>
+                <div class="stack">
+                  <span class="label">Mix colors</span>
+                  ${legend()}
+                </div>
+              </div>
+              ${sessionTable(sessions, selectedId)}
+            </section>
+            ${scopedSession ? sessionDetail(scopedSession) : `
+              <section class="panel stack">
+                <h2>Select a session</h2>
+                <p class="microcopy">Click a session to make it the active dashboard context. Metrics, Runtimes, and Timeline will then follow that session until you clear it.</p>
+              </section>
+            `}
+          </div>
+        `;
+      }
+
+      function renderTimeline(dashboard = data) {
+        return `
+          <div class="page">
+            ${collapsiblePanel({
+              title: dashboard.scope_active ? "Selected Session Timeline" : "Daily Token Timeline",
+              subtitle: dashboard.scope_active ? "Aggregated by UTC date from LLM spans in the selected session." : "Aggregated by UTC date from event timestamps.",
+              count: `${fmt(dashboard.timeline.length)} day${dashboard.timeline.length === 1 ? "" : "s"}`,
+              body: `
+              ${annotatedTimeline(dashboard.timeline)}
+              `,
+            })}
+          </div>
+        `;
+      }
+
+      function render() {
+        const dashboard = scopedDashboardData();
+        renderNav();
+        renderRail(dashboard);
+        renderTop(dashboard);
+        const app = document.getElementById("app");
+        let body = renderOverview(dashboard);
+        if (state.view === "runtimes") body = renderRuntimes(dashboard);
+        else if (state.view === "sessions") body = renderSessions();
+        else if (state.view === "timeline") body = renderTimeline(dashboard);
+        app.innerHTML = `<div class="page">${renderProjectSummary(dashboard)}${body}</div>`;
+        document.querySelectorAll("[data-view]").forEach((button) => {
+          button.addEventListener("click", () => {
+            state.view = button.dataset.view;
+            render();
+          });
+        });
+        document.querySelectorAll("[data-clear-session-scope]").forEach((button) => {
+          button.addEventListener("click", () => {
+            state.selectedSessionId = "";
+            state.selectedSpanId = "";
+            render();
+          });
+        });
+        document.querySelectorAll("[data-session-id]").forEach((button) => {
+          button.addEventListener("click", () => {
+            state.selectedSessionId = button.dataset.sessionId || "";
+            state.selectedSpanId = "";
+            state.view = "overview";
+            render();
+          });
+        });
+        document.querySelectorAll("[data-span-id]").forEach((button) => {
+          button.addEventListener("click", () => {
+            const spanId = button.dataset.spanId || "";
+            state.selectedSpanId = state.selectedSpanId === spanId ? "" : spanId;
+            render();
+          });
+        });
+      }
+
+      render();
+    </script>
+  </body>
+</html>

@@ -1,21 +1,18 @@
 # Job Scraper Docs
 
-This documentation is organized for engineers evaluating how the worker could fit
-into an existing automation stack.
+This folder is the human-facing interface for the project. Use it for stable explanations, architecture notes, and implementation references that should be readable without going through `.contexts/`.
 
-## Start Here
+## Reading Order
 
 1. [Architecture](01-architecture.md)
 2. [ADK Job Listing Scout](02-adk-job-listing-scout.md)
+3. [Public Export Workflow](03-public-export.md)
 
-## Evaluate The Repo
+## Related Planning
 
-- Agent contract: `skills/job-listing-scout/SKILL.md`
-- Tool boundary: `src/job_scraper/adk_tools.py`
-- Sandbox worker: `src/sandbox_page_analyst/`
-- Persistence layer: `src/job_scraper/db/`
-- Verification suite: `tests/`
+- [Plans index](../plans/index.md)
+- [Active agentic scraper implementation plan](../plans/active/01-agentic-scraper-implementation.md)
 
-## Maintainer Reference
+## Agent Context
 
-- [Repository Curation Workflow](03-public-export.md)
+`.contexts/` remains the agent-operational context store: active task state, handoff, decisions, references, and lineage. Human docs should link to agent context when useful, but should not require humans to inspect `.contexts/` directly.

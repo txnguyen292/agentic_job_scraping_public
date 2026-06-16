@@ -1,0 +1,2332 @@
+{
+  "optimal_gold_run": {
+    "final_response": {
+      "parts": [
+        {
+          "text": "Verified 20 persisted ITviec jobs from finalized sandbox output."
+        }
+      ],
+      "role": "model"
+    },
+    "intermediate_data": {
+      "invocation_events": [
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "context_pack_id": "age26-runtime-context"
+                  },
+                  "id": "call-1",
+                  "name": "load_project_context"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-1",
+                  "name": "load_project_context",
+                  "response": {
+                    "active_task": "AGE-26",
+                    "status": "success"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "resource": "itviec-listing-v1",
+                    "skill": "job-listing-scout"
+                  },
+                  "id": "call-2",
+                  "name": "load_skill_resource"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-2",
+                  "name": "load_skill_resource",
+                  "response": {
+                    "status": "success"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "html_artifact": "tests/fixtures/itviec_ai_engineer_ha_noi.html",
+                    "mode": "workflow"
+                  },
+                  "id": "call-3",
+                  "name": "sandbox_start.py"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-3",
+                  "name": "sandbox_start.py",
+                  "response": {
+                    "audit_id": "sandbox_run_age18_gold_20260521_104255",
+                    "status": "running"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "cmd": "python - <<'PY'\n# count job-card units and field markers\nPY"
+                  },
+                  "id": "call-4",
+                  "name": "sandbox_exec.py"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-4",
+                  "name": "sandbox_exec.py",
+                  "response": {
+                    "status": "success",
+                    "stdout": "job_card_class 20\njob_url_attr 20\njob_title_target 20"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "expected_output": {
+                      "expected_job_count": 20
+                    }
+                  },
+                  "id": "call-5",
+                  "name": "update_extraction_context"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-5",
+                  "name": "update_extraction_context",
+                  "response": {
+                    "status": "success"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "producer_output_plan": {
+                      "strategy": "one job per .job-card"
+                    }
+                  },
+                  "id": "call-6",
+                  "name": "update_extraction_context"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-6",
+                  "name": "update_extraction_context",
+                  "response": {
+                    "status": "success"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "path": "output/extractor.py"
+                  },
+                  "id": "call-7",
+                  "name": "sandbox_write_file.py"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-7",
+                  "name": "sandbox_write_file.py",
+                  "response": {
+                    "path": "output/extractor.py",
+                    "status": "success"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "cmd": "python output/extractor.py"
+                  },
+                  "id": "call-8",
+                  "name": "sandbox_exec.py"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-8",
+                  "name": "sandbox_exec.py",
+                  "response": {
+                    "jobs": 20,
+                    "status": "success"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "audit_id": "sandbox_run_age18_gold_20260521_104255"
+                  },
+                  "id": "call-9",
+                  "name": "validate_outputs.py"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-9",
+                  "name": "validate_outputs.py",
+                  "response": {
+                    "valid": true,
+                    "warnings": []
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "audit_id": "sandbox_run_age18_gold_20260521_104255"
+                  },
+                  "id": "call-10",
+                  "name": "sandbox_finalize.py"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-10",
+                  "name": "sandbox_finalize.py",
+                  "response": {
+                    "status": "finalized"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "audit_id": "sandbox_run_age18_gold_20260521_104255"
+                  },
+                  "id": "call-11",
+                  "name": "promote_sandbox_extraction"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-11",
+                  "name": "promote_sandbox_extraction",
+                  "response": {
+                    "status": "success",
+                    "written_count": 20
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "limit": 25,
+                    "source_name": "ITviec AI Engineer Hanoi"
+                  },
+                  "id": "call-12",
+                  "name": "query_jobs"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-12",
+                  "name": "query_jobs",
+                  "response": {
+                    "count": 20,
+                    "status": "success"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "run_id": "sandbox_run_age18_gold_20260521_104255",
+                    "written_count": 20
+                  },
+                  "id": "call-13",
+                  "name": "record_crawl_run"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-13",
+                  "name": "record_crawl_run",
+                  "response": {
+                    "status": "success"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        }
+      ]
+    },
+    "invocation_id": "optimal-adk-invocation",
+    "user_content": {
+      "parts": [
+        {
+          "text": "Extract the ITviec Hanoi AI Engineer fixture and persist verified jobs."
+        }
+      ],
+      "role": "user"
+    }
+  },
+  "good_non_exact_run": {
+    "final_response": {
+      "parts": [
+        {
+          "text": "Verified 20 persisted jobs."
+        }
+      ],
+      "role": "model"
+    },
+    "intermediate_data": {
+      "invocation_events": [
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "context_pack_id": "age26-runtime-context"
+                  },
+                  "id": "call-1",
+                  "name": "load_project_context"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-1",
+                  "name": "load_project_context",
+                  "response": {
+                    "status": "success"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "skill": "job-listing-scout"
+                  },
+                  "id": "call-2",
+                  "name": "load_skill_resource"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-2",
+                  "name": "load_skill_resource",
+                  "response": {
+                    "status": "success"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "mode": "workflow"
+                  },
+                  "id": "call-3",
+                  "name": "sandbox_start.py"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-3",
+                  "name": "sandbox_start.py",
+                  "response": {
+                    "audit_id": "sandbox_run_age18_gold_20260521_104255",
+                    "status": "running"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "path": "inputs.json"
+                  },
+                  "id": "call-4",
+                  "name": "sandbox_read.py"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-4",
+                  "name": "sandbox_read.py",
+                  "response": {
+                    "status": "success"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "cmd": "rg -c 'data-search--job-selection-target=\"jobTitle\"' page.html"
+                  },
+                  "id": "call-5",
+                  "name": "sandbox_exec.py"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-5",
+                  "name": "sandbox_exec.py",
+                  "response": {
+                    "status": "success",
+                    "stdout": "20"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "expected_output": {
+                      "expected_job_count": 20
+                    }
+                  },
+                  "id": "call-6",
+                  "name": "update_extraction_context"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-6",
+                  "name": "update_extraction_context",
+                  "response": {
+                    "status": "success"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "producer_output_plan": {
+                      "strategy": "reuse package if probe matches"
+                    }
+                  },
+                  "id": "call-7",
+                  "name": "update_extraction_context"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-7",
+                  "name": "update_extraction_context",
+                  "response": {
+                    "status": "success"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "path": "progress.json"
+                  },
+                  "id": "call-8",
+                  "name": "sandbox_read.py"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-8",
+                  "name": "sandbox_read.py",
+                  "response": {
+                    "status": "success"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "path": "output/extractor.py"
+                  },
+                  "id": "call-9",
+                  "name": "sandbox_write_file.py"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-9",
+                  "name": "sandbox_write_file.py",
+                  "response": {
+                    "status": "success"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "cmd": "python output/extractor.py"
+                  },
+                  "id": "call-10",
+                  "name": "sandbox_exec.py"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-10",
+                  "name": "sandbox_exec.py",
+                  "response": {
+                    "jobs": 20,
+                    "status": "success"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "audit_id": "sandbox_run_age18_gold_20260521_104255"
+                  },
+                  "id": "call-11",
+                  "name": "validate_outputs.py"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-11",
+                  "name": "validate_outputs.py",
+                  "response": {
+                    "valid": true
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "audit_id": "sandbox_run_age18_gold_20260521_104255"
+                  },
+                  "id": "call-12",
+                  "name": "sandbox_finalize.py"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-12",
+                  "name": "sandbox_finalize.py",
+                  "response": {
+                    "status": "finalized"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "audit_id": "sandbox_run_age18_gold_20260521_104255"
+                  },
+                  "id": "call-13",
+                  "name": "promote_sandbox_extraction"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-13",
+                  "name": "promote_sandbox_extraction",
+                  "response": {
+                    "status": "success",
+                    "written_count": 20
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "limit": 25
+                  },
+                  "id": "call-14",
+                  "name": "query_jobs"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-14",
+                  "name": "query_jobs",
+                  "response": {
+                    "count": 20,
+                    "status": "success"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "written_count": 20
+                  },
+                  "id": "call-15",
+                  "name": "record_crawl_run"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-15",
+                  "name": "record_crawl_run",
+                  "response": {
+                    "status": "success"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        }
+      ]
+    },
+    "invocation_id": "good-non-exact-adk-invocation",
+    "user_content": {
+      "parts": [
+        {
+          "text": "Extract the ITviec Hanoi AI Engineer fixture and persist verified jobs."
+        }
+      ],
+      "role": "user"
+    }
+  },
+  "neutral_partial_progress_run": {
+    "intermediate_data": {
+      "invocation_events": [
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "context_pack_id": "age26-runtime-context"
+                  },
+                  "id": "call-1",
+                  "name": "load_project_context"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-1",
+                  "name": "load_project_context",
+                  "response": {
+                    "status": "success"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "skill": "job-listing-scout"
+                  },
+                  "id": "call-2",
+                  "name": "load_skill_resource"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-2",
+                  "name": "load_skill_resource",
+                  "response": {
+                    "status": "success"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "mode": "workflow"
+                  },
+                  "id": "call-3",
+                  "name": "sandbox_start.py"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-3",
+                  "name": "sandbox_start.py",
+                  "response": {
+                    "status": "running"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "path": "plan.md"
+                  },
+                  "id": "call-4",
+                  "name": "sandbox_read.py"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-4",
+                  "name": "sandbox_read.py",
+                  "response": {
+                    "status": "success"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "cmd": "python - <<'PY'\n# inspect cards\nPY"
+                  },
+                  "id": "call-5",
+                  "name": "sandbox_exec.py"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-5",
+                  "name": "sandbox_exec.py",
+                  "response": {
+                    "status": "success",
+                    "stdout": "20 cards"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "expected_output": {
+                      "expected_job_count": 20
+                    }
+                  },
+                  "id": "call-6",
+                  "name": "update_extraction_context"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-6",
+                  "name": "update_extraction_context",
+                  "response": {
+                    "status": "success"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "path": "inputs.json"
+                  },
+                  "id": "call-7",
+                  "name": "sandbox_read.py"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-7",
+                  "name": "sandbox_read.py",
+                  "response": {
+                    "status": "success"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "producer_output_plan": {
+                      "strategy": "write extractor"
+                    }
+                  },
+                  "id": "call-8",
+                  "name": "update_extraction_context"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-8",
+                  "name": "update_extraction_context",
+                  "response": {
+                    "status": "success"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "path": "progress.json"
+                  },
+                  "id": "call-9",
+                  "name": "sandbox_read.py"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-9",
+                  "name": "sandbox_read.py",
+                  "response": {
+                    "status": "success"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "path": "output/extractor.py"
+                  },
+                  "id": "call-10",
+                  "name": "sandbox_write_file.py"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-10",
+                  "name": "sandbox_write_file.py",
+                  "response": {
+                    "status": "success"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        }
+      ]
+    },
+    "invocation_id": "neutral-partial-progress-adk-invocation",
+    "user_content": {
+      "parts": [
+        {
+          "text": "Extract the ITviec Hanoi AI Engineer fixture and persist verified jobs."
+        }
+      ],
+      "role": "user"
+    }
+  },
+  "bad_no_verified_output_run": {
+    "intermediate_data": {
+      "invocation_events": [
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "path": "output/random_1.json"
+                  },
+                  "id": "call-1",
+                  "name": "sandbox_write_file.py"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-1",
+                  "name": "sandbox_write_file.py",
+                  "response": {
+                    "guardrail": "unplanned_output_write",
+                    "status": "rejected"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "path": "output/random_2.json"
+                  },
+                  "id": "call-2",
+                  "name": "sandbox_write_file.py"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-2",
+                  "name": "sandbox_write_file.py",
+                  "response": {
+                    "guardrail": "unplanned_output_write",
+                    "status": "rejected"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "path": "output/random_3.json"
+                  },
+                  "id": "call-3",
+                  "name": "sandbox_write_file.py"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-3",
+                  "name": "sandbox_write_file.py",
+                  "response": {
+                    "guardrail": "unplanned_output_write",
+                    "status": "rejected"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "path": "output/random_4.json"
+                  },
+                  "id": "call-4",
+                  "name": "sandbox_write_file.py"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-4",
+                  "name": "sandbox_write_file.py",
+                  "response": {
+                    "guardrail": "unplanned_output_write",
+                    "status": "rejected"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "path": "output/random_5.json"
+                  },
+                  "id": "call-5",
+                  "name": "sandbox_write_file.py"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-5",
+                  "name": "sandbox_write_file.py",
+                  "response": {
+                    "guardrail": "unplanned_output_write",
+                    "status": "rejected"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "path": "output/random_6.json"
+                  },
+                  "id": "call-6",
+                  "name": "sandbox_write_file.py"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-6",
+                  "name": "sandbox_write_file.py",
+                  "response": {
+                    "guardrail": "unplanned_output_write",
+                    "status": "rejected"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "path": "output/random_7.json"
+                  },
+                  "id": "call-7",
+                  "name": "sandbox_write_file.py"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-7",
+                  "name": "sandbox_write_file.py",
+                  "response": {
+                    "guardrail": "unplanned_output_write",
+                    "status": "rejected"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "path": "output/random_8.json"
+                  },
+                  "id": "call-8",
+                  "name": "sandbox_write_file.py"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-8",
+                  "name": "sandbox_write_file.py",
+                  "response": {
+                    "guardrail": "unplanned_output_write",
+                    "status": "rejected"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "path": "output/random_9.json"
+                  },
+                  "id": "call-9",
+                  "name": "sandbox_write_file.py"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-9",
+                  "name": "sandbox_write_file.py",
+                  "response": {
+                    "guardrail": "unplanned_output_write",
+                    "status": "rejected"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "path": "output/random_10.json"
+                  },
+                  "id": "call-10",
+                  "name": "sandbox_write_file.py"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-10",
+                  "name": "sandbox_write_file.py",
+                  "response": {
+                    "guardrail": "unplanned_output_write",
+                    "status": "rejected"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "path": "output/random_11.json"
+                  },
+                  "id": "call-11",
+                  "name": "sandbox_write_file.py"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-11",
+                  "name": "sandbox_write_file.py",
+                  "response": {
+                    "guardrail": "unplanned_output_write",
+                    "status": "rejected"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "path": "output/random_12.json"
+                  },
+                  "id": "call-12",
+                  "name": "sandbox_write_file.py"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-12",
+                  "name": "sandbox_write_file.py",
+                  "response": {
+                    "guardrail": "unplanned_output_write",
+                    "status": "rejected"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "path": "output/random_13.json"
+                  },
+                  "id": "call-13",
+                  "name": "sandbox_write_file.py"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-13",
+                  "name": "sandbox_write_file.py",
+                  "response": {
+                    "guardrail": "unplanned_output_write",
+                    "status": "rejected"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "path": "output/random_14.json"
+                  },
+                  "id": "call-14",
+                  "name": "sandbox_write_file.py"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-14",
+                  "name": "sandbox_write_file.py",
+                  "response": {
+                    "guardrail": "unplanned_output_write",
+                    "status": "rejected"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "path": "output/random_15.json"
+                  },
+                  "id": "call-15",
+                  "name": "sandbox_write_file.py"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-15",
+                  "name": "sandbox_write_file.py",
+                  "response": {
+                    "guardrail": "unplanned_output_write",
+                    "status": "rejected"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "path": "output/random_16.json"
+                  },
+                  "id": "call-16",
+                  "name": "sandbox_write_file.py"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-16",
+                  "name": "sandbox_write_file.py",
+                  "response": {
+                    "guardrail": "unplanned_output_write",
+                    "status": "rejected"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "path": "output/random_17.json"
+                  },
+                  "id": "call-17",
+                  "name": "sandbox_write_file.py"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-17",
+                  "name": "sandbox_write_file.py",
+                  "response": {
+                    "guardrail": "unplanned_output_write",
+                    "status": "rejected"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "path": "output/random_18.json"
+                  },
+                  "id": "call-18",
+                  "name": "sandbox_write_file.py"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-18",
+                  "name": "sandbox_write_file.py",
+                  "response": {
+                    "guardrail": "unplanned_output_write",
+                    "status": "rejected"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "path": "output/random_19.json"
+                  },
+                  "id": "call-19",
+                  "name": "sandbox_write_file.py"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-19",
+                  "name": "sandbox_write_file.py",
+                  "response": {
+                    "guardrail": "unplanned_output_write",
+                    "status": "rejected"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "path": "output/random_20.json"
+                  },
+                  "id": "call-20",
+                  "name": "sandbox_write_file.py"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-20",
+                  "name": "sandbox_write_file.py",
+                  "response": {
+                    "guardrail": "unplanned_output_write",
+                    "status": "rejected"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        }
+      ]
+    },
+    "invocation_id": "bad-no-verified-output-adk-invocation",
+    "user_content": {
+      "parts": [
+        {
+          "text": "Extract the ITviec Hanoi AI Engineer fixture and persist verified jobs."
+        }
+      ],
+      "role": "user"
+    }
+  },
+  "bad_premature_finalization_run": {
+    "final_response": {
+      "parts": [
+        {
+          "text": "I extracted and saved the jobs."
+        }
+      ],
+      "role": "model"
+    },
+    "intermediate_data": {
+      "invocation_events": [
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "context_pack_id": "age26-runtime-context"
+                  },
+                  "id": "call-1",
+                  "name": "load_project_context"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-1",
+                  "name": "load_project_context",
+                  "response": {
+                    "status": "success"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "audit_id": "sandbox_run_age18_gold_20260521_104255"
+                  },
+                  "id": "call-2",
+                  "name": "sandbox_finalize.py"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-2",
+                  "name": "sandbox_finalize.py",
+                  "response": {
+                    "guardrail": "validation_not_passed",
+                    "status": "rejected"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "audit_id": "sandbox_run_age18_gold_20260521_104255"
+                  },
+                  "id": "call-3",
+                  "name": "promote_sandbox_extraction"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-3",
+                  "name": "promote_sandbox_extraction",
+                  "response": {
+                    "guardrail": "sandbox_not_finalized",
+                    "status": "rejected"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "mode": "workflow"
+                  },
+                  "id": "call-4",
+                  "name": "sandbox_start.py"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-4",
+                  "name": "sandbox_start.py",
+                  "response": {
+                    "audit_id": "sandbox_run_age18_gold_20260521_104255",
+                    "status": "running"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "cmd": "cat progress.json"
+                  },
+                  "id": "call-5",
+                  "name": "sandbox_exec.py"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-5",
+                  "name": "sandbox_exec.py",
+                  "response": {
+                    "status": "success",
+                    "stdout": "{}"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_call": {
+                  "args": {
+                    "text": "Reported unverified results"
+                  },
+                  "id": "call-6",
+                  "name": "final_answer"
+                }
+              }
+            ],
+            "role": "model"
+          }
+        },
+        {
+          "author": "job_listing_scout",
+          "content": {
+            "parts": [
+              {
+                "function_response": {
+                  "id": "call-6",
+                  "name": "final_answer",
+                  "response": {
+                    "guardrail": "unverified_final_answer",
+                    "status": "rejected"
+                  }
+                }
+              }
+            ],
+            "role": "model"
+          }
+        }
+      ]
+    },
+    "invocation_id": "bad-premature-finalization-adk-invocation",
+    "user_content": {
+      "parts": [
+        {
+          "text": "Extract the ITviec Hanoi AI Engineer fixture and persist verified jobs."
+        }
+      ],
+      "role": "user"
+    }
+  }
+}
