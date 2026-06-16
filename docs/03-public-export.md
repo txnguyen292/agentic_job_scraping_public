@@ -1,49 +1,93 @@
-# Repository Curation Workflow
+# Public Export Workflow
 
-This repository is maintained as a curated public code sample. The curation
-workflow keeps the engineering artifacts that help reviewers understand and reuse
-the worker, while excluding local runtime state, credentials, generated data, and
-scratch artifacts.
+This project keeps the private/internal repo as the source of truth. A public
+repo, if created, should be a sanitized snapshot derived from this repo, not a
+hand-maintained fork and not a raw mirror.
 
-## What Belongs Here
+## Why
 
-- Source code for the worker, agent tool layer, sandbox analyst, and CLI.
-- Skills, schemas, and references that describe reusable extraction behavior.
-- Deterministic fixtures and tests that make behavior inspectable.
-- Documentation that explains the architecture, workflow boundaries, and
-  integration points.
+The internal repo intentionally contains agent-operational material such as
+`.contexts/`, ADK runtime artifacts, local reports, traces, and scratch data.
+Those files are useful for development but should not be published by default.
 
-## What Stays Out
+## Source Of Truth
 
-- Environment files and credentials.
-- Local databases, generated crawl data, and ADK session artifacts.
-- Private traces, scratch workspaces, and machine-specific paths.
-- Runtime caches and virtual environments.
+- Internal repo: `agentic_job_scraping`
+- Optional public repo: `agentic_job_scraping_public`
+- Public snapshots are generated from the internal repo using
+  `public_export.toml`.
 
-## Verification
+## Export Rules
 
-The public tree can be checked with:
+The export is allowlist-first:
 
-```bash
-uv run python scripts/sync_public.py verify .
-```
+- Include only the paths listed in `public_export.toml`.
+- Always exclude private/runtime paths such as `.contexts/`, `.env*`, `data/`,
+  `reports/adk-runs/`, `src/.adk/`, caches, and local session files.
+- Verify the exported tree before publishing.
 
-The exporter is allowlist-first. It includes only the configured public paths and
-fails verification when forbidden files or obvious secret patterns are present.
+## Usage
 
-Preview the configured file set with:
+Preview the export without writing anything:
 
 ```bash
 uv run python scripts/sync_public.py plan --json
 ```
 
-## Release Discipline
+Dry-run a sync to a separate public checkout:
 
-Before publishing changes, review the diff as if this were a client-facing
-artifact:
+```bash
+uv run python scripts/sync_public.py sync ../agentic_job_scraping_public
+```
 
-1. Confirm the README describes the worker clearly in the first screen.
-2. Confirm links are relative and portable.
-3. Run the public-tree verifier.
-4. Run the relevant tests for the changed surface.
-5. Review the GitHub rendering before sharing the repository link externally.
+Write the sanitized snapshot:
+
+```bash
+uv run python scripts/sync_public.py sync ../agentic_job_scraping_public --apply
+```
+
+Verify an existing public checkout:
+
+```bash
+uv run python scripts/sync_public.py verify ../agentic_job_scraping_public
+```
+
+The script deliberately does not push by default. After reviewing the exported
+tree, commit and push from the public checkout or let a dedicated CI workflow do
+that in a later step.
+
+## Automation Status
+
+Public export has a GitHub Actions workflow scaffold in the internal repo:
+
+- `.github/workflows/internal-ci.yml` runs tests, validates `.contexts/`, checks
+  the public export plan, exports a sanitized snapshot on internal PRs, and opens
+  or updates a PR in `txnguyen292/agentic_job_scraping_public`.
+- `.github/workflows/public-export-verify.yml` is included in the public export
+  and validates exporter changes on public PRs.
+
+The workflow requires this internal-repo secret:
+
+```text
+PUBLIC_REPO_SYNC_TOKEN
+```
+
+That token must be able to write contents and pull requests in
+`txnguyen292/agentic_job_scraping_public`.
+
+The automated workflow runs the same allowlisted export and verification steps:
+
+```bash
+uv run python scripts/sync_public.py plan --json
+uv run python scripts/sync_public.py sync <public-checkout> --apply
+uv run python scripts/sync_public.py verify <public-checkout>
+```
+
+The workflow opens a public PR; it does not merge directly into public `main`.
+Both repos need an initial `main` commit before this PR automation can run
+reliably.
+
+## What Not To Do
+
+Do not use `git push --mirror` for the public repo. A raw mirror can publish
+private history, generated artifacts, or local operational state.

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import threading
 from types import SimpleNamespace
 
@@ -60,3 +61,37 @@ def test_scrapling_response_text_rejects_http_errors() -> None:
         assert "HTTP 404" in str(exc)
     else:
         raise AssertionError("Expected HTTP errors to raise RuntimeError")
+
+
+def test_fixture_crawl_serializes_metadata_json_deterministically() -> None:
+    greenhouse_source, lever_source = sources.load_sources("seeds/demo_sources.json")
+
+    greenhouse_job = next(iter(sources.crawl_source(greenhouse_source)))
+    lever_job = next(iter(sources.crawl_source(lever_source)))
+
+    assert greenhouse_job.metadata_json == json.dumps(
+        {
+            "raw_id": 1001,
+            "departments": ["Applied AI"],
+            "offices": ["Remote"],
+        },
+        sort_keys=True,
+    )
+    assert lever_job.metadata_json == json.dumps(
+        {
+            "raw_id": "lv-2001",
+            "workplaceType": "",
+            "categories": {
+                "team": "Autonomy",
+                "location": "Taipei, Taiwan",
+                "commitment": "Full-time",
+            },
+        },
+        sort_keys=True,
+    )
+
+
+def test_metadata_json_accepts_json_dump_customization() -> None:
+    rendered = sources._metadata_json({"b": 1, "a": 2}, sort_keys=False, separators=(",", ":"))
+
+    assert rendered == '{"b":1,"a":2}'

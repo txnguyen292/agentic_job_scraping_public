@@ -7,6 +7,7 @@
 - Surface OpenAI reasoning telemetry in ADK Web metadata without showing token-only telemetry as fake chat thoughts.
 - Add LiteLLM/OpenAI reasoning effort configuration for mini/high workflow experiments.
 - Add release-note automation that mirrors this changelog section into pull requests as a collapsible block.
+- Add a `job-scraper-adk-dashboard` entry point for the local ADK Observability dashboard.
 
 ### Changed
 
