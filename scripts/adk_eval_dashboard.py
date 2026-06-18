@@ -12,12 +12,7 @@ from typing import Annotated
 
 import typer
 from rich.console import Console
-
-SCRIPT_DIR = Path(__file__).resolve().parent
-if str(SCRIPT_DIR) not in sys.path:
-    sys.path.insert(0, str(SCRIPT_DIR))
-
-from utils import DEFAULT_INPUT, build_dashboard_data, render_dashboard_html, write_dashboard
+from scripts.utils import DEFAULT_INPUT, build_dashboard_data, render_dashboard_html, write_dashboard
 
 
 DEFAULT_OUTPUT = Path("reports/adk-eval-dashboard.html")
