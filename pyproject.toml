@@ -34,6 +34,7 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
 markers = [
   "docker: requires Docker runtime",
   "adk_eval: requires ADK eval/model runtime",
