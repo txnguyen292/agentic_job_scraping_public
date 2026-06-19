@@ -1,16 +1,9 @@
 from __future__ import annotations
 
-import importlib.util
 import subprocess
 from pathlib import Path
 
-
-MODULE_PATH = Path(__file__).resolve().parents[1] / "scripts" / "release_notes.py"
-SPEC = importlib.util.spec_from_file_location("release_notes", MODULE_PATH)
-assert SPEC is not None
-release_notes = importlib.util.module_from_spec(SPEC)
-assert SPEC.loader is not None
-SPEC.loader.exec_module(release_notes)
+from scripts import release_notes
 
 
 def test_extract_unreleased_stops_at_next_release() -> None:
