@@ -146,6 +146,12 @@ uv run pytest
 uv run python scripts/sync_public.py verify .
 ```
 
+Release notes are maintained as per-PR fragments in `release-notes/unreleased/`.
+Every PR should add or update one fragment, including an explicit
+`No user-facing changes.` fragment for internal-only work. PR automation renders
+only fragments changed by that PR; `CHANGELOG.md` remains the cumulative release
+history.
+
 ## Scope
 
 This repository is intentionally focused on the backend worker pattern:
