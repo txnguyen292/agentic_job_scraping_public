@@ -1,0 +1,1 @@
+- ADK eval dashboard event cards now expand inline to show full payloads for debugging.

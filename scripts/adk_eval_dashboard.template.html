@@ -477,11 +477,24 @@
         padding-right: 4px;
       }
 
-      .event-button {
-        width: 100%;
+      .event-item {
         border: 1px solid var(--line);
         border-radius: 8px;
         background: rgba(255, 255, 255, 0.025);
+        overflow: hidden;
+      }
+
+      .event-item.is-selected {
+        border-color: var(--primary);
+        background: var(--surface-selected);
+        box-shadow: inset 3px 0 0 var(--primary);
+      }
+
+      .event-button {
+        width: 100%;
+        border: 0;
+        border-radius: 0;
+        background: transparent;
         color: inherit;
         padding: 12px;
         text-align: left;
@@ -489,14 +502,18 @@
       }
 
       .event-button:hover {
-        border-color: var(--line-strong);
         background: rgba(255, 255, 255, 0.055);
       }
 
-      .event-button.is-selected {
-        border-color: var(--primary);
-        background: var(--surface-selected);
-        box-shadow: inset 3px 0 0 var(--primary);
+      .event-expanded {
+        border-top: 1px solid rgba(138, 180, 248, 0.32);
+        display: grid;
+        gap: 8px;
+        padding: 0 12px 12px 12px;
+      }
+
+      .event-expanded pre {
+        max-height: 520px;
       }
 
       .event-order {
@@ -652,6 +669,7 @@
         view: "overview",
         runId: data.runs[0]?.id || "",
         eventId: "",
+        expandedEvents: {},
         expandedLists: {},
       };
 
@@ -761,6 +779,17 @@
           return jsonBlock(payload);
         }
         return renderAdkTextValue(text, "Raw final_response text");
+      }
+
+      function renderEventFullPayload(event) {
+        if (!event) return "";
+        if (event.kind === "user_message") {
+          return renderAdkTextValue(contentText(event.payload), "Raw user prompt text");
+        }
+        if (event.kind === "final_response") {
+          return renderFinalResponsePayload(event.payload);
+        }
+        return jsonBlock(event.payload);
       }
 
       function renderFinalResponses(run) {
@@ -1042,17 +1071,30 @@
         const runs = renderRunCards({ compact: true });
         const eventListId = `events:${run.id}`;
 
-        const events = limitedItems(eventListId, run.events).map((item) => `
-          <button class="event-button tw-focus-ring ${item.event_id === state.eventId ? "is-selected" : ""}" data-action="select-event" data-event-id="${esc(item.event_id)}">
-            <div class="row">
-              <span class="event-order">${String(item.order).padStart(2, "0")}</span>
-              ${pill(item.kind, "")}
-              ${item.status ? pill(item.status, statusMode(item.status)) : ""}
-            </div>
-            <h3>${esc(item.title)}</h3>
-            <p class="microcopy">${esc(item.summary)}</p>
-          </button>
-        `).join("");
+        const events = limitedItems(eventListId, run.events).map((item) => {
+          const isSelected = item.event_id === state.eventId;
+          const isExpanded = Boolean(state.expandedEvents[item.event_id]);
+          return `
+            <article class="event-item ${isSelected ? "is-selected" : ""} ${isExpanded ? "is-expanded" : ""}">
+              <button class="event-button tw-focus-ring" data-action="toggle-event" data-event-id="${esc(item.event_id)}" aria-expanded="${isExpanded ? "true" : "false"}">
+                <div class="row">
+                  <span class="event-order">${String(item.order).padStart(2, "0")}</span>
+                  ${pill(item.kind, "")}
+                  ${item.status ? pill(item.status, statusMode(item.status)) : ""}
+                  ${pill(isExpanded ? "expanded" : "click to expand", "")}
+                </div>
+                <h3>${esc(item.title)}</h3>
+                <p class="microcopy">${esc(item.summary)}</p>
+              </button>
+              ${isExpanded ? `
+                <div class="event-expanded">
+                  <div class="label">Full event payload</div>
+                  ${renderEventFullPayload(item)}
+                </div>
+              ` : ""}
+            </article>
+          `;
+        }).join("");
 
         const metricDetails = event?.metric ? `
           <section class="stack">
@@ -1283,11 +1325,14 @@
           state.expandedLists.runs = true;
           state.eventId = "";
         }
-        if (action === "select-event") {
+        if (action === "select-event" || action === "toggle-event") {
           state.eventId = button.getAttribute("data-event-id");
           const eventRunId = state.eventId.replace(/:event:\d+$/, "");
           if (data.runs.some((run) => run.id === eventRunId)) {
             state.runId = eventRunId;
+          }
+          if (action === "toggle-event") {
+            state.expandedEvents[state.eventId] = !state.expandedEvents[state.eventId];
           }
           state.view = "trace";
         }
