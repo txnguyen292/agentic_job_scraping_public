@@ -25,7 +25,6 @@ include = [
   "reports/index.md",
   "scripts/adk_token_dashboard.py",
   "scripts/adk_token_dashboard.template.html",
-  "scripts/linear_release_ledger.py",
   "scripts/release_notes.py",
   "scripts/sync_public.py",
   "scripts/update_adk_model_pricing.py",

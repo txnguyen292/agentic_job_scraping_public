@@ -2,12 +2,20 @@
 
 from __future__ import annotations
 
+import importlib.util
 from pathlib import Path
 from typing import Annotated
 
-import adk_token_dashboard
 import typer
 from rich.console import Console
+
+
+MODULE_PATH = Path(__file__).with_name("adk_token_dashboard.py")
+SPEC = importlib.util.spec_from_file_location("adk_token_dashboard", MODULE_PATH)
+assert SPEC is not None
+adk_token_dashboard = importlib.util.module_from_spec(SPEC)
+assert SPEC.loader is not None
+SPEC.loader.exec_module(adk_token_dashboard)
 
 console = Console(stderr=True)
 app = typer.Typer(

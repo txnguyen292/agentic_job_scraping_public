@@ -5,17 +5,17 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "job-scraper"
 version = "0.1.0"
-description = "Backend worker for LLM-assisted job extraction with sandboxed validation and SQLite persistence."
+description = "Seed-driven AI/ML job scraper with SQLite storage and a Streamlit dashboard."
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
   "google-adk[eval]>=1.32,<1.33",
-  "litellm>=1.82,<2",
+  "litellm>=1.84,<2",
   "loguru>=0.7,<1",
   "docker>=7,<8",
   "openai-agents>=0.14,<0.15",
   "pydantic>=2,<3",
-  "pytest>=8,<9",
+  "pytest>=9.0.3,<10",
   "rich>=13.7,<14",
   "scrapling[fetchers]>=0.4.7,<0.5",
   "streamlit>=1.40,<2",
