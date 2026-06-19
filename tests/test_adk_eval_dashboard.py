@@ -1,23 +1,10 @@
 from __future__ import annotations
 
-import importlib.util
 import json
 from pathlib import Path
 
-
-MODULE_PATH = Path(__file__).resolve().parents[1] / "scripts" / "adk_eval_dashboard.py"
-SPEC = importlib.util.spec_from_file_location("adk_eval_dashboard", MODULE_PATH)
-assert SPEC is not None
-adk_eval_dashboard = importlib.util.module_from_spec(SPEC)
-assert SPEC.loader is not None
-SPEC.loader.exec_module(adk_eval_dashboard)
-
-UTILS_PATH = Path(__file__).resolve().parents[1] / "scripts" / "utils.py"
-UTILS_SPEC = importlib.util.spec_from_file_location("adk_eval_dashboard_utils", UTILS_PATH)
-assert UTILS_SPEC is not None
-adk_eval_dashboard_utils = importlib.util.module_from_spec(UTILS_SPEC)
-assert UTILS_SPEC.loader is not None
-UTILS_SPEC.loader.exec_module(adk_eval_dashboard_utils)
+from scripts import adk_eval_dashboard
+from scripts import utils as adk_eval_dashboard_utils
 
 
 def _metric(name: str, score: float | None, status: int, rubrics: list[dict] | None = None) -> dict:

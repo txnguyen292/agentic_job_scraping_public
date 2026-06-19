@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "job-scraper"
 version = "0.1.0"
-description = "Seed-driven AI/ML job scraper with SQLite storage and a Streamlit dashboard."
+description = "Backend worker for LLM-assisted job extraction with sandboxed validation and SQLite persistence."
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
@@ -34,6 +34,7 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
 markers = [
   "docker: requires Docker runtime",
   "adk_eval: requires ADK eval/model runtime",
