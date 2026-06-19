@@ -52,7 +52,7 @@ TEST_PAGE_FIXTURES: dict[str, dict[str, str]] = {
         ),
         "description": "Frozen ITviec AI Engineer Hanoi listing page used for deterministic extractor tests.",
     }
-}
+    }
 
 
 def fetch_page(url: str, timeout: int = 20, max_chars: int = DEFAULT_CONTENT_LIMIT) -> dict[str, Any]:
@@ -214,12 +214,24 @@ def update_extraction_context(
     task understanding and initial plan before loading skills or inspecting
     resources. Continue using it during a live sandbox workflow after meaningful
     observations, extractor runs, validation errors, repair decisions, or
-    attempted actions. Treat initial_plan as the broad workflow plan and
-    extraction_strategy as the current method for turning observed repeated job
-    units into complete outputs. The strategy should be written after a
-    representative unit inspection, enhanced when new evidence adds useful
-    detail, and revised when evidence or validation contradicts it. Treat
-    last_result, known_errors, immediate_goal, and planned_next_tool as
+    attempted actions. Treat initial_plan as the bootstrap guide only. After
+    early evidence, adapt it into extraction_plan. Treat extraction_strategy as
+    the detailed method derived from extraction_plan for turning observed
+    repeated job units into complete outputs. Treat immediate_goal as the
+    current bounded step inside extraction_strategy, including evidence,
+    strategy, validation, and next script/probe objective; producer scripts
+    should not be written from initial_plan alone. Good immediate_goal example:
+    "Establish repeated job-card unit boundary for the fixed ITviec fixture.
+    Evidence: fixed page artifact, representative repeated card markup/text,
+    and bounded selector/count evidence. Strategy: target one repeated job-card
+    unit per in-scope listing using [data-search--pagination-target='jobCard']
+    and exclude navigation/company preview links. Validation: run a bounded
+    count probe and pass only when the count is 20 for the fixture. Next script
+    objective: write the smallest probe that counts repeated job units and
+    records the unit boundary." The strategy should be
+    written after a representative unit inspection, enhanced when new evidence
+    adds useful detail, and revised when evidence or validation contradicts it.
+    Treat last_result, known_errors, immediate_goal, and planned_next_tool as
     current-state replacement fields: last_result should summarize only the
     latest non-context tool result, known_errors should list only active
     blockers, and planned_next_tool should advance after successful extractor,
@@ -304,11 +316,23 @@ def update_extraction_context(
             context["repair_scope"] = compact_repair_scope
         else:
             context.pop("repair_scope", None)
+    if compact_extraction_strategy is not None and compact_extraction_strategy and not context.get("extraction_plan"):
+        return {
+            "status": "error",
+            "error_type": "extraction_strategy_policy",
+            "guardrail": "extraction_strategy_requires_extraction_plan",
+            "error": "extraction_strategy must be derived from extraction_plan, not stored as an independent plan.",
+            "required_next": (
+                "Call update_extraction_context with extraction_plan first, then include extraction_strategy as the "
+                "more detailed method derived from that plan."
+            ),
+        }
     if compact_extraction_strategy is not None:
         if compact_extraction_strategy:
             context["extraction_strategy"] = compact_extraction_strategy
         else:
             context.pop("extraction_strategy", None)
+    context.pop("current_goal", None)
     if compact_workflow_contract is not None:
         if normalized_required_outputs and not _normalize_required_outputs(compact_workflow_contract.get("required_outputs")):
             compact_workflow_contract["required_outputs"] = normalized_required_outputs

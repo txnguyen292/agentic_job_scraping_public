@@ -287,7 +287,7 @@ def test_litellm_malformed_tool_json_is_returned_to_model(monkeypatch) -> None:
 
     monkeypatch.setattr(LiteLlm, "generate_content_async", fake_generate_content_async)
 
-    llm = SerializableLiteLlm(model="deepseek/deepseek-v4-pro")
+    llm = SerializableLiteLlm(model="openai/gpt-5.4-mini")
     request = LlmRequest(
         contents=[
             types.Content(role="user", parts=[types.Part.from_text(text="run the next sandbox step")])
@@ -333,7 +333,7 @@ def test_litellm_provider_json_error_is_returned_to_model(monkeypatch) -> None:
 
     monkeypatch.setattr(LiteLlm, "generate_content_async", fake_generate_content_async)
 
-    llm = SerializableLiteLlm(model="deepseek/deepseek-v4-pro")
+    llm = SerializableLiteLlm(model="openai/gpt-5.4-mini")
     request = LlmRequest(
         contents=[
             types.Content(role="user", parts=[types.Part.from_text(text="write the extraction script")])
@@ -368,7 +368,7 @@ def test_litellm_provider_json_error_emits_terminal_response_after_retry(monkeyp
 
     monkeypatch.setattr(LiteLlm, "generate_content_async", fake_generate_content_async)
 
-    llm = SerializableLiteLlm(model="deepseek/deepseek-v4-pro")
+    llm = SerializableLiteLlm(model="openai/gpt-5.4-mini")
     request = LlmRequest(
         contents=[types.Content(role="user", parts=[types.Part.from_text(text="continue")])]
     )
@@ -409,7 +409,7 @@ def test_litellm_provider_timeout_is_returned_to_model(monkeypatch) -> None:
 
     monkeypatch.setattr(LiteLlm, "generate_content_async", fake_generate_content_async)
 
-    llm = SerializableLiteLlm(model="deepseek/deepseek-v4-pro", timeout=0.01)
+    llm = SerializableLiteLlm(model="openai/gpt-5.4-mini", timeout=0.01)
     request = LlmRequest(
         contents=[types.Content(role="user", parts=[types.Part.from_text(text="continue")])]
     )
@@ -440,7 +440,7 @@ def test_litellm_provider_timeout_emits_terminal_response_after_retry(monkeypatc
 
     monkeypatch.setattr(LiteLlm, "generate_content_async", fake_generate_content_async)
 
-    llm = SerializableLiteLlm(model="deepseek/deepseek-v4-pro", timeout=0.01)
+    llm = SerializableLiteLlm(model="openai/gpt-5.4-mini", timeout=0.01)
     request = LlmRequest(
         contents=[types.Content(role="user", parts=[types.Part.from_text(text="continue")])]
     )
@@ -472,10 +472,23 @@ def test_root_agent_instruction_requires_sandbox_for_url_scraping() -> None:
     assert "follow the mode reference it instructs you to load" in root_agent.instruction
     assert "Use direct fetch/render tools only for explicit diagnostics" in root_agent.instruction
     assert "compact reasoning notebook" in root_agent.instruction
-    assert "`initial_plan` is the broad workflow startup plan" in root_agent.instruction
+    assert "`initial_plan` is the bootstrap workflow guide" in root_agent.instruction
+    assert "Once `extraction_plan` exists, do not treat `initial_plan` as live guidance" in root_agent.instruction
+    assert "`extraction_plan` is the adaptive plan" in root_agent.instruction
     assert "`extraction_strategy`" in root_agent.instruction
+    assert "detailed method derived from `extraction_plan`" in root_agent.instruction
     assert "enhance it when new evidence" in root_agent.instruction
     assert "revise it when new evidence or validation/finalization contradicts it" in root_agent.instruction
+    assert "`current_goal`" not in root_agent.instruction
+    assert "Before writing or running producer scripts such as output/extractor.py" in root_agent.instruction
+    assert "`immediate_goal` must name the current step inside `extraction_strategy`" in root_agent.instruction
+    assert "evidence, strategy, validation, and next script/probe objective" in root_agent.instruction
+    assert "Good immediate_goal example:" in root_agent.instruction
+    assert "Evidence: fixed page artifact" in root_agent.instruction
+    assert "[data-search--pagination-target='jobCard']" in root_agent.instruction
+    assert "Validation: run a bounded count probe and pass only when the count is 20" in root_agent.instruction
+    assert "Next script objective: write the smallest probe" in root_agent.instruction
+    assert "establish the repeated job-card unit boundary" in root_agent.instruction
     assert "record what you observe" in root_agent.instruction
     assert "how those observations should produce the required outputs" in root_agent.instruction
     assert "reconcile the new result with the context" in root_agent.instruction

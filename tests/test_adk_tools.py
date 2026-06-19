@@ -25,6 +25,16 @@ from job_scraper.sandbox_terminal import SandboxRegistry, SandboxSessionRecord
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SOURCE_FILE = PROJECT_ROOT / "seeds" / "demo_sources.json"
+DETAILED_IMMEDIATE_GOAL = (
+    "Establish repeated job-card unit boundary for the fixed ITviec fixture. "
+    "Evidence: fixed page artifact, representative repeated card markup/text, "
+    "and bounded selector/count evidence. Strategy: target one repeated job-card "
+    "unit per in-scope listing using [data-search--pagination-target='jobCard'] "
+    "and exclude navigation/company preview links. Validation: run a bounded "
+    "count probe and pass only when the count is 20 for the fixture. Next script "
+    "objective: write the smallest probe that counts repeated job units and records "
+    "the unit boundary."
+)
 
 
 class FakeToolContext:
@@ -38,6 +48,17 @@ def test_list_seed_references_returns_demo_sources() -> None:
     assert result["status"] == "success"
     assert result["count"] == 2
     assert result["items"][0]["source_type"] == "greenhouse"
+
+
+def test_update_extraction_context_docstring_includes_good_immediate_goal_example() -> None:
+    docstring = update_extraction_context.__doc__ or ""
+    normalized = " ".join(docstring.split())
+
+    assert "Good immediate_goal example:" in normalized
+    assert "Evidence: fixed page artifact" in normalized
+    assert "[data-search--pagination-target='jobCard']" in normalized
+    assert "Validation: run a bounded count probe and pass only when the count is 20" in normalized
+    assert "Next script objective: write the smallest probe" in normalized
 
 
 def test_crawl_seed_sources_and_query_jobs(tmp_path: Path) -> None:
@@ -88,7 +109,7 @@ def test_update_extraction_context_writes_session_state_only() -> None:
         last_result={"status": "invalid", "count": 64},
         known_errors=["navigation links were included"],
         attempted_actions=["checked output/final.json existence", "read placeholder output/extractor.py"],
-        immediate_goal="repair output/extractor.py",
+        immediate_goal=DETAILED_IMMEDIATE_GOAL,
         planned_next_tool={
             "tool_name": "run_skill_script",
             "skill_name": "sandbox-page-analyst",
@@ -156,6 +177,8 @@ def test_update_extraction_context_writes_session_state_only() -> None:
     assert saved["observations"] == ["20 job-card markers", "64 broad links included navigation"]
     assert saved["extraction_strategy"]["target_units"] == "one job per repeated job-card container"
     assert saved["extraction_strategy"]["field_patterns"]["company_name"] == "visible company text near title"
+    assert "current_goal" not in saved
+    assert saved["immediate_goal"] == DETAILED_IMMEDIATE_GOAL
     assert saved["attempted_actions"] == ["checked output/final.json existence", "read placeholder output/extractor.py"]
     assert saved["last_result"] == {"status": "invalid", "count": 64}
     assert saved["planned_next_tool"]["file_path"] == "scripts/sandbox_apply_patch.py"
@@ -172,6 +195,8 @@ def test_update_extraction_context_writes_session_state_only() -> None:
     assert result["workflow_contract"]["success_gate"] == "validate and finalize before persistence"
     assert result["expected_output"]["count_basis"] == "20 job-card markers"
     assert result["extraction_strategy"]["count_method"] == "count repeated card containers"
+    assert "current_goal" not in result
+    assert result["immediate_goal"] == DETAILED_IMMEDIATE_GOAL
     assert result["output_contract"]["extraction_run_json"]["required"] == [
         "observations",
         "chosen_strategy",
@@ -182,6 +207,23 @@ def test_update_extraction_context_writes_session_state_only() -> None:
         "output/candidates.json",
         "output/final.json",
     ]
+
+
+def test_update_extraction_context_rejects_strategy_without_extraction_plan() -> None:
+    context = FakeToolContext()
+
+    result = update_extraction_context(
+        extraction_strategy={
+            "status": "active",
+            "target_units": "one job per repeated job-card container",
+        },
+        immediate_goal=DETAILED_IMMEDIATE_GOAL,
+        tool_context=context,  # type: ignore[arg-type]
+    )
+
+    assert result["status"] == "error"
+    assert result["guardrail"] == "extraction_strategy_requires_extraction_plan"
+    assert SESSION_EXTRACTION_CONTEXT_STATE_KEY not in context.state
 
 
 def test_update_extraction_context_merges_attempted_actions_without_duplicates() -> None:
