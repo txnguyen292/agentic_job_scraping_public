@@ -73,6 +73,19 @@ class FakeAdkState:
         return self[key]
 
 
+def valid_immediate_goal() -> str:
+    return (
+        "Establish repeated job-card unit boundary for the fixed ITviec fixture. "
+        "Evidence: fixed page artifact, representative repeated card markup/text, "
+        "and bounded selector/count evidence. Strategy: target one repeated job-card "
+        "unit per in-scope listing using [data-search--pagination-target='jobCard'] "
+        "and exclude navigation/company preview links. Validation: run a bounded "
+        "count probe and pass only when the count is 20 for the fixture. Next script "
+        "objective: write the smallest probe that counts repeated job units and records "
+        "the unit boundary."
+    )
+
+
 def workflow_contract_state() -> dict[str, object]:
     required_outputs = [
         "output/page_profile.json",
@@ -118,6 +131,19 @@ def workflow_contract_state() -> dict[str, object]:
             "script_manifest": {"required_if_supporting_scripts_authored": True},
             "validation_plan": ["validate_outputs.py", "sandbox_finalize.py"],
         },
+        "initial_plan": ["bootstrap: load fixture, inspect repeated units, then write extractor"],
+        "extraction_plan": ["select one repeated job-card container per job"],
+        "extraction_strategy": {
+            "status": "active",
+            "derived_from": "extraction_plan after first repeated-card evidence",
+            "target_units": "one job per repeated job-card container",
+            "unit_boundary": "[data-search--pagination-target='jobCard']",
+            "count_method": "count repeated card containers",
+            "field_patterns": {"company_name": "visible company text near title"},
+            "coverage_plan": "create and load one evidence chunk per card",
+            "revision_policy": "enhance on new field details; revise on validator contradiction",
+        },
+        "immediate_goal": valid_immediate_goal(),
         "evidence_contract": {
             "requires_loaded_evidence_refs": True,
             "requires_field_rationale": True,
@@ -127,6 +153,15 @@ def workflow_contract_state() -> dict[str, object]:
 
 def workflow_output_plan_state(required_outputs: list[str]) -> dict[str, object]:
     return {
+        "extraction_plan": ["select one repeated job-card container per job"],
+        "extraction_strategy": {
+            "status": "active",
+            "derived_from": "extraction_plan after first repeated-card evidence",
+            "target_units": "one job per repeated job-card container",
+            "unit_boundary": "[data-search--pagination-target='jobCard']",
+            "count_method": "count repeated card containers",
+        },
+        "immediate_goal": valid_immediate_goal(),
         "output_contract": {
             "contract_version": "sandbox-page-analyst-protocol-v1",
             "extraction_run_json": {
@@ -1082,6 +1117,51 @@ def test_workflow_guard_blocks_terminal_text_while_workflow_sandbox_is_running()
     assert "planned_next_tool" not in function_call.args
 
 
+def test_workflow_guard_replaces_premature_text_with_planned_sandbox_start_call() -> None:
+    plugin = SandboxWorkflowGuardPlugin()
+    state = {
+        SESSION_EXTRACTION_CONTEXT_STATE_KEY: {
+            "updated": True,
+            "planned_next_tool": {
+                "tool_name": "run_skill_script",
+                "skill_name": "sandbox-page-analyst",
+                "file_path": "scripts/sandbox_start.py",
+            },
+        },
+        LAST_PAGE_WORKSPACE_STATE_KEY: {
+            "artifact_path": "/tmp/page.html",
+            "url": "https://itviec.com/it-jobs/ai-engineer/ha-noi",
+        },
+    }
+
+    replacement = asyncio.run(
+        plugin.after_model_callback(
+            callback_context=SimpleNamespace(state=state),
+            llm_response=LlmResponse(
+                content=genai_types.Content(
+                    role="model",
+                    parts=[genai_types.Part.from_text(text="I loaded the fixture. Next I would start the sandbox.")],
+                )
+            ),
+        )
+    )
+
+    assert replacement is not None
+    function_call = replacement.content.parts[0].function_call
+    assert function_call.name == "run_skill_script"
+    assert function_call.id.startswith("call_runtime_")
+    assert function_call.args["skill_name"] == "sandbox-page-analyst"
+    assert function_call.args["file_path"] == "scripts/sandbox_start.py"
+    assert function_call.args["args"] == [
+        "--mode",
+        "workflow",
+        "--page-artifact",
+        "/tmp/page.html",
+        "--source-url",
+        "https://itviec.com/it-jobs/ai-engineer/ha-noi",
+    ]
+
+
 def test_model_reasoning_telemetry_surfaces_reasoning_summary_to_state() -> None:
     from job_scraper.adk_plugins import MODEL_REASONING_TELEMETRY_STATE_KEY, ModelReasoningTelemetryPlugin
 
@@ -1425,6 +1505,7 @@ def test_workflow_guard_injects_session_extraction_context() -> None:
             "updated": True,
             "audit_id": "sandbox_run_test",
             "final_goal": "Extract validated jobs and save them.",
+            "initial_plan": ["stale startup draft that should not be injected after extraction_plan exists"],
             "observations": ["20 job-card markers", "64 broad links included navigation"],
             "extraction_plan": ["repair extractor to select job-card containers"],
             "extraction_strategy": {
@@ -1440,7 +1521,7 @@ def test_workflow_guard_injects_session_extraction_context() -> None:
             "last_result": {"status": "invalid", "count": 64},
             "known_errors": ["output/final.json missing because extractor is placeholder"],
             "attempted_actions": ["checked output/final.json existence", "read placeholder output/extractor.py"],
-            "immediate_goal": "repair output/extractor.py",
+            "immediate_goal": valid_immediate_goal(),
             "planned_next_tool": {
                 "tool_name": "run_skill_script",
                 "skill_name": "sandbox-page-analyst",
@@ -1498,7 +1579,15 @@ def test_workflow_guard_injects_session_extraction_context() -> None:
     assert "previous update_extraction_context failed" in injected
     assert "reconcile <LATEST_TOOL_RESULT> when present" in injected
     assert "final_goal, immediate_goal" in injected
-    assert "Treat extraction_strategy as the current" in injected
+    assert "Treat extraction_plan as the adaptive plan" in injected
+    assert "Treat extraction_strategy as the detailed method derived from extraction_plan" in injected
+    assert "Treat immediate_goal as the current bounded step inside extraction_strategy" in injected
+    assert "initial_plan is not enough to write or run output/extractor.py" in injected
+    assert "Good immediate_goal example:" in injected
+    assert "Evidence: fixed page artifact" in injected
+    assert "[data-search--pagination-target='jobCard']" in injected
+    assert "Validation: run a bounded count probe and pass only when the count is 20" in injected
+    assert "Next script objective: write the smallest probe" in injected
     assert "enhance it when new evidence adds field/pattern detail" in injected
     assert "Do not repeat actions that did not change state" in injected
     assert "20 job-card markers" in injected
@@ -1509,6 +1598,9 @@ def test_workflow_guard_injects_session_extraction_context() -> None:
     assert "planned_next_tool" in injected
     assert "repair_scope" in injected
     assert "workflow_contract" in injected
+    assert "current_goal" not in injected
+    assert "stale startup draft" not in injected
+    assert "repeated job-card unit boundary" in injected
     assert "required_outputs" in injected
     assert "workflow_reflections" in injected
     assert "learned interpretations" in injected
@@ -1873,6 +1965,110 @@ def test_workflow_guard_allows_sandbox_start_with_workflow_contract() -> None:
                 "skill_name": "sandbox-page-analyst",
                 "file_path": "scripts/sandbox_start.py",
                 "args": ["--mode", "workflow", "--page-artifact", "pages/page.html"],
+            },
+            tool_context=tool_context,
+        )
+    )
+
+    assert allowed is None
+
+
+def test_workflow_guard_blocks_producer_write_without_immediate_goal() -> None:
+    plugin = SandboxWorkflowGuardPlugin()
+    tool_context = FakeToolContext()
+    context_state = workflow_contract_state()
+    context_state.pop("immediate_goal")
+    tool_context.state[SESSION_EXTRACTION_CONTEXT_STATE_KEY] = context_state
+    tool_context.state[ACTIVE_SANDBOX_STATE_KEY] = {
+        "audit_id": "sandbox_run_test",
+        "status": "running",
+        "mode": "workflow",
+    }
+
+    blocked = asyncio.run(
+        plugin.before_tool_callback(
+            tool=SimpleNamespace(name="run_skill_script"),
+            tool_args={
+                "skill_name": "sandbox-page-analyst",
+                "file_path": "scripts/sandbox_write_file.py",
+                "args": [
+                    "--audit-id",
+                    "sandbox_run_test",
+                    "--path",
+                    "output/extractor.py",
+                    "--content",
+                    protocol_producer_source(),
+                ],
+            },
+            tool_context=tool_context,
+        )
+    )
+
+    assert blocked is not None
+    assert blocked["status"] == "error"
+    assert blocked["guardrail"] == "immediate_goal_required"
+    assert blocked["missing"] == "immediate_goal"
+    assert "initial_plan alone is not enough" in blocked["required_next"]
+
+
+def test_workflow_guard_blocks_producer_run_when_immediate_goal_lacks_validation_detail() -> None:
+    plugin = SandboxWorkflowGuardPlugin()
+    tool_context = FakeToolContext()
+    context_state = workflow_contract_state()
+    context_state["immediate_goal"] = "establish repeated job-card unit boundary"
+    tool_context.state[SESSION_EXTRACTION_CONTEXT_STATE_KEY] = context_state
+    tool_context.state[ACTIVE_SANDBOX_STATE_KEY] = {
+        "audit_id": "sandbox_run_test",
+        "status": "running",
+        "mode": "workflow",
+    }
+
+    blocked = asyncio.run(
+        plugin.before_tool_callback(
+            tool=SimpleNamespace(name="run_skill_script"),
+            tool_args={
+                "skill_name": "sandbox-page-analyst",
+                "file_path": "scripts/sandbox_exec.py",
+                "args": ["--audit-id", "sandbox_run_test", "--cmd", "python output/extractor.py"],
+            },
+            tool_context=tool_context,
+        )
+    )
+
+    assert blocked is not None
+    assert blocked["status"] == "error"
+    assert blocked["guardrail"] == "immediate_goal_validation_strategy_required"
+    assert "validation_detail" in blocked["missing"]
+    assert "next_script_objective" in blocked["missing"]
+    assert "current step with evidence, strategy, validation, and next script/probe objective" in blocked[
+        "unsatisfied_requirements"
+    ][0]["agent_responsibility"]
+
+
+def test_workflow_guard_allows_producer_write_with_valid_immediate_goal() -> None:
+    plugin = SandboxWorkflowGuardPlugin()
+    tool_context = FakeToolContext()
+    tool_context.state[SESSION_EXTRACTION_CONTEXT_STATE_KEY] = workflow_contract_state()
+    tool_context.state[ACTIVE_SANDBOX_STATE_KEY] = {
+        "audit_id": "sandbox_run_test",
+        "status": "running",
+        "mode": "workflow",
+    }
+
+    allowed = asyncio.run(
+        plugin.before_tool_callback(
+            tool=SimpleNamespace(name="run_skill_script"),
+            tool_args={
+                "skill_name": "sandbox-page-analyst",
+                "file_path": "scripts/sandbox_write_file.py",
+                "args": [
+                    "--audit-id",
+                    "sandbox_run_test",
+                    "--path",
+                    "output/extractor.py",
+                    "--content",
+                    protocol_producer_source(),
+                ],
             },
             tool_context=tool_context,
         )
@@ -4719,6 +4915,15 @@ def test_workflow_guard_bounds_repair_scope_resources_and_patch_targets() -> Non
     }
     tool_context.state[SESSION_EXTRACTION_CONTEXT_STATE_KEY] = {
         "updated": True,
+        "extraction_plan": ["repair extractor card loop after validating repeated job-card boundary"],
+        "extraction_strategy": {
+            "status": "active",
+            "derived_from": "validated repeated card boundary plus finalizer feedback",
+            "target_units": "one job per repeated job-card container",
+            "unit_boundary": "[data-search--pagination-target='jobCard']",
+            "count_method": "count repeated card containers",
+        },
+        "immediate_goal": valid_immediate_goal(),
         "repair_scope": {
             "status": "patching",
             "objective": "repair extractor card loop",

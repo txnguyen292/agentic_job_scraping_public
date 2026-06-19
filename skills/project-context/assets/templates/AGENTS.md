@@ -28,6 +28,7 @@ This repo uses the `.contexts/` convention for coding-agent context.
 - Update `.contexts/handoff.md` at the end of each meaningful work block.
 - Use `.contexts/working/` for checkpoint updates when the task delta is large.
 - Append one event to `.contexts/lineage/events.jsonl` for each meaningful state change.
+- If the active task or handoff has `linear_issue`, run `.contexts/bin/linear_update_payload` and post the returned body to Linear after meaningful context updates; if Linear fails, record the blocker.
 - Update `.contexts/current-state.md` only when project-wide status, blockers, or priorities change.
 - Create or update a decision doc only when a real decision changed.
 

@@ -33,6 +33,7 @@ AGENTS.md
     requirements.txt
   bin/
     context_overview
+    linear_update_payload
     list_tasks
     list_decisions
     list_references
@@ -138,6 +139,7 @@ For the `.contexts/tools/context_cli.py` backend:
 - The lead agent should update `.contexts/current-state.md` when project-wide status changed.
 - Any agent may append lineage events.
 - Decision docs should change only when a decision changed.
+- If a task or handoff has `linear_issue` metadata, agents should post a matching Linear status update after meaningful context changes, or record a blocker if Linear is unavailable.
 
 ## Metadata Contract
 
@@ -173,6 +175,9 @@ Recommended frontmatter keys:
 - `read_next`
 - `related_docs`
 - `blocked_by`
+- `linear_issue`
+- `linear_url`
+- `related_linear`
 
 Recommended body sections:
 

@@ -196,6 +196,7 @@ def test_new_context_maintenance_commands_are_registered_and_wrapped() -> None:
     command_names = {command.name for command in module.app.registered_commands}
     expected = {
         "context_health",
+        "linear_update_payload",
         "summarize_lineage",
         "context_drift_report",
         "get_working_context",
@@ -262,6 +263,32 @@ def test_working_context_round_trip_and_review_flow(tmp_path: Path, monkeypatch:
     module.propose_skill_maintenance(output_path=proposal_path, task_id="T-001", limit=10, overwrite=True)
     assert proposal_path.exists()
     assert "Project-Context Skill Maintenance Draft" in proposal_path.read_text(encoding="utf-8")
+
+
+def test_linear_update_payload_uses_linked_task_and_handoff(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    module = load_context_cli_module()
+    seed_context_tree(tmp_path)
+    monkeypatch.setattr(module, "repo_root", lambda: tmp_path)
+
+    task = module.read_doc(tmp_path / ".contexts/tasks/T-001.md")
+    task.frontmatter["linear_issue"] = "AGE-10"
+    task.frontmatter["linear_url"] = "https://linear.app/example/issue/AGE-10/test"
+    task.frontmatter["summary"] = "Dashboard parser helpers moved into utils."
+    task.frontmatter["next_step"] = "Post the Linear status update."
+    module.write_doc(task)
+
+    handoff = module.read_doc(tmp_path / ".contexts/handoff.md")
+    handoff.frontmatter["summary"] = "Context tools now generate Linear update payloads."
+    handoff.frontmatter["verification"] = ["pytest context cli"]
+    module.write_doc(handoff)
+
+    payload = module.build_linear_update_payload("T-001", root=tmp_path)
+
+    assert payload["issue_id"] == "AGE-10"
+    assert payload["issue_url"].endswith("/AGE-10/test")
+    assert payload["source_docs"] == ["T-001", "handoff"]
+    assert "Dashboard parser helpers moved into utils." in payload["body"]
+    assert "pytest context cli" in payload["body"]
 
     module.clear_working_context("T-001")
     assert not (tmp_path / ".contexts" / "working" / "T-001.md").exists()

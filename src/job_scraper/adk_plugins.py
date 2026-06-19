@@ -285,6 +285,9 @@ class SandboxWorkflowGuardPlugin(BasePlugin):
         workflow_contract_error = _workflow_contract_policy_error(tool_name, tool_args, tool_context)
         if workflow_contract_error:
             return workflow_contract_error
+        immediate_goal_error = _immediate_goal_policy_error(tool_name, tool_args, tool_context)
+        if immediate_goal_error:
+            return immediate_goal_error
         repair_scope_error = _repair_scope_policy_error(tool_name, tool_args, tool_context)
         if repair_scope_error:
             return repair_scope_error
@@ -476,7 +479,7 @@ class SandboxWorkflowGuardPlugin(BasePlugin):
                 )
             return _add_required_next(
                 result,
-                "Continue the sandbox workflow with the appropriate loaded sandbox tool: inspect page evidence, derive repeated patterns, load bounded evidence, write supporting scripts only as needed, create accountable protocol outputs, validate, then finalize.",
+                "Continue the sandbox workflow by first recording extraction_plan, extraction_strategy, and immediate_goal if they are missing. The immediate_goal must name the current strategy step with evidence, strategy, validation, and next script/probe objective before producer scripting.",
             )
 
         active = state.get(ACTIVE_SANDBOX_STATE_KEY)
@@ -593,6 +596,8 @@ class SandboxWorkflowGuardPlugin(BasePlugin):
             return None
         command_count = int(active.get("command_count") or 0)
         pending_script = _pending_scripts_for_active_sandbox(state, active) if _is_state_like(state) else {}
+        session_context = state.get(SESSION_EXTRACTION_CONTEXT_STATE_KEY) if _is_state_like(state) else None
+        immediate_goal_error = _immediate_goal_validation_error(session_context) if isinstance(session_context, dict) else None
         if pending_script:
             next_action = (
                 f"A workflow helper/script was written but has not been verified. Run the relevant focused command "
@@ -602,6 +607,14 @@ class SandboxWorkflowGuardPlugin(BasePlugin):
         elif isinstance(active.get("last_repair_target"), dict):
             repair = active["last_repair_target"]
             next_action = _repair_target_next_action(repair)
+        elif immediate_goal_error:
+            next_action = (
+                "Before running sandbox probes as validation or writing/running producer scripts, call "
+                "update_extraction_context with extraction_plan, extraction_strategy, and immediate_goal. "
+                "The immediate_goal must name the current strategy step with evidence, strategy, validation, "
+                "and next script/probe objective. For the first ITviec fixture goal, establish the repeated "
+                "job-card unit boundary and the smallest validation probe for that boundary."
+            )
         elif command_count >= 5:
             next_action = (
                 "You likely have enough page inspection evidence. Continue the sandbox workflow by choosing the "
@@ -648,6 +661,9 @@ class SandboxWorkflowGuardPlugin(BasePlugin):
         state = getattr(callback_context, "state", None)
         if not _is_state_like(state):
             return None
+        planned_replacement = _planned_next_tool_model_replacement(state, llm_response)
+        if planned_replacement:
+            return planned_replacement
         repair_replacement = _active_repair_target_model_replacement(state, llm_response)
         if repair_replacement:
             return repair_replacement
@@ -1349,6 +1365,160 @@ def _workflow_contract_policy_error(
             "SESSION_EXTRACTION_CONTEXT before starting the workflow sandbox or writing/running producer scripts."
         ),
     )
+
+
+def _immediate_goal_policy_error(
+    tool_name: str,
+    tool_args: dict[str, Any],
+    tool_context: Any,
+) -> dict[str, Any] | None:
+    if not _is_immediate_goal_required_tool(tool_name, tool_args, tool_context):
+        return None
+
+    state = getattr(tool_context, "state", None)
+    if not _is_state_like(state):
+        return None
+    context = state.get(SESSION_EXTRACTION_CONTEXT_STATE_KEY)
+    if not isinstance(context, dict):
+        return None
+
+    audit_id = _active_repair_audit_id(tool_context)
+    path = _immediate_goal_target_path(tool_args)
+    validation_error = _immediate_goal_validation_error(context)
+    if not validation_error:
+        return None
+
+    return {
+        "status": "error",
+        "error_type": "immediate_goal_policy",
+        "guardrail": validation_error["guardrail"],
+        "audit_id": audit_id,
+        "path": path,
+        "missing": validation_error["missing"],
+        "error": validation_error["error"],
+        "unsatisfied_requirements": [
+            {
+                "id": "immediate_goal_recorded_before_producer_scripting",
+                "path": path,
+                "missing": validation_error["missing"],
+                "agent_responsibility": (
+                    "Probe bounded page evidence, derive extraction_strategy from extraction_plan, and record the "
+                    "current step with evidence, strategy, validation, and next script/probe objective before "
+                    "writing or running producer code."
+                ),
+            }
+        ],
+        "required_next_tool": {
+            "tool_name": "update_extraction_context",
+            "extraction_plan": [
+                "Establish the repeated job-card unit boundary before extracting fields.",
+                "Use the validated boundary to extract canonical URLs and fields in later steps.",
+            ],
+            "extraction_strategy": {
+                "status": "active",
+                "derived_from": "extraction_plan plus representative repeated-card evidence",
+                "target_units": "one repeated job-card unit per in-scope listing",
+                "unit_boundary": "agent-chosen selector or structural boundary from probed evidence",
+                "count_method": "bounded count probe over the chosen unit boundary",
+                "known_exclusions": ["navigation and non-listing links"],
+                "coverage_plan": "verify every repeated unit before field extraction",
+                "revision_policy": "enhance with new field evidence; revise on validator contradiction",
+            },
+            "immediate_goal": (
+                "Establish repeated job-card unit boundary for the fixed ITviec fixture. Evidence: fixed page "
+                "artifact, representative repeated card markup/text, and bounded selector/count evidence. "
+                "Strategy: target one repeated job-card unit per in-scope listing and exclude navigation/company "
+                "preview links. Validation: run a bounded count probe and pass only when the count matches observed "
+                "in-scope listing units. Next script objective: write the smallest probe that counts repeated job "
+                "units and records the unit boundary."
+            ),
+        },
+        "required_next": (
+            "Call update_extraction_context with extraction_plan, extraction_strategy, and immediate_goal before "
+            "producer scripting. The immediate_goal must be derived from evidence and include the current step, "
+            "strategy, validation, and next script/probe objective. initial_plan alone is not enough to write or "
+            "run output/extractor.py."
+        ),
+        "count": 0,
+        "written_count": 0,
+    }
+
+
+def _is_immediate_goal_required_tool(tool_name: str, tool_args: dict[str, Any], tool_context: Any) -> bool:
+    if tool_name != "run_skill_script" or tool_args.get("skill_name") != "sandbox-page-analyst":
+        return False
+    if not _has_active_workflow_sandbox(tool_context):
+        return False
+    file_path = _normalize_skill_path(str(tool_args.get("file_path") or ""))
+    if file_path == "scripts/sandbox_write_file.py":
+        return _sandbox_write_target_path(tool_args) == WORKFLOW_PRODUCER_PATH
+    if file_path == "scripts/sandbox_apply_patch.py":
+        return _sandbox_write_touches_producer(tool_args)
+    return file_path == "scripts/sandbox_exec.py" and _sandbox_exec_runs_producer(tool_args)
+
+
+def _immediate_goal_target_path(tool_args: dict[str, Any]) -> str:
+    file_path = _normalize_skill_path(str(tool_args.get("file_path") or ""))
+    if file_path == "scripts/sandbox_write_file.py":
+        return _sandbox_write_target_path(tool_args) or WORKFLOW_PRODUCER_PATH
+    return WORKFLOW_PRODUCER_PATH
+
+
+def _immediate_goal_validation_error(context: Any) -> dict[str, Any] | None:
+    if not isinstance(context, dict):
+        return None
+    immediate_goal = context.get("immediate_goal")
+    if not isinstance(immediate_goal, str) or not immediate_goal.strip():
+        return {
+            "guardrail": "immediate_goal_required",
+            "missing": "immediate_goal",
+            "error": (
+                "Producer scripting is blocked until SESSION_EXTRACTION_CONTEXT.immediate_goal exists. "
+                "The agent must establish the current bounded step from evidence before writing or running producer code."
+            ),
+        }
+
+    missing: list[str] = []
+    if not _nonempty_sequence_or_text(context.get("extraction_plan")):
+        missing.append("extraction_plan")
+    extraction_strategy = context.get("extraction_strategy")
+    if not isinstance(extraction_strategy, dict) or not extraction_strategy:
+        missing.append("extraction_strategy")
+
+    goal_text = immediate_goal.lower()
+    if not _text_mentions_any(goal_text, ("evidence", "observed", "probe", "selector", "count", "artifact")):
+        missing.append("evidence_detail")
+    if not _text_mentions_any(goal_text, ("strategy", "target", "unit", "boundary", "method", "selector")):
+        missing.append("strategy_detail")
+    if not _text_mentions_any(goal_text, ("validation", "validate", "pass", "criteria", "check", "count probe")):
+        missing.append("validation_detail")
+    if not _text_mentions_any(goal_text, ("next script", "next probe", "objective", "write", "run", "smallest")):
+        missing.append("next_script_objective")
+
+    if not missing:
+        return None
+
+    guardrail = "immediate_goal_validation_strategy_required" if "validation_detail" in missing else "immediate_goal_incomplete"
+    return {
+        "guardrail": guardrail,
+        "missing": missing,
+        "error": (
+            "Producer scripting is blocked because SESSION_EXTRACTION_CONTEXT.immediate_goal is incomplete. "
+            f"Missing: {', '.join(missing)}."
+        ),
+    }
+
+
+def _nonempty_sequence_or_text(value: Any) -> bool:
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, list):
+        return any(bool(str(item).strip()) for item in value)
+    return False
+
+
+def _text_mentions_any(text: str, markers: tuple[str, ...]) -> bool:
+    return any(marker in text for marker in markers)
 
 
 def _workflow_contract_update_policy_error(tool_args: dict[str, Any], tool_context: Any) -> dict[str, Any] | None:
@@ -3839,6 +4009,63 @@ def _repair_target_next_action(repair: dict[str, Any]) -> str:
     )
 
 
+def _planned_next_tool_model_replacement(state: Any, llm_response: LlmResponse) -> LlmResponse | None:
+    if _llm_response_has_function_call(llm_response):
+        return None
+    text = _llm_response_text(llm_response)
+    if not text.strip():
+        return None
+    context = state.get(SESSION_EXTRACTION_CONTEXT_STATE_KEY) if _is_state_like(state) else None
+    if not isinstance(context, dict):
+        return None
+    planned = context.get("planned_next_tool")
+    if not isinstance(planned, dict):
+        return None
+    tool_name = str(planned.get("tool_name") or "").strip()
+    if not tool_name or tool_name == "update_extraction_context":
+        return None
+    args = _planned_next_tool_call_args(planned, state)
+    if args is None:
+        return None
+    return LlmResponse(
+        content=genai_types.Content(
+            role="model",
+            parts=[_synthetic_function_call_part(name=tool_name, args=args)],
+        )
+    )
+
+
+def _planned_next_tool_call_args(planned: dict[str, Any], state: Any) -> dict[str, Any] | None:
+    tool_name = str(planned.get("tool_name") or "").strip()
+    args = {str(key): value for key, value in planned.items() if key != "tool_name" and value is not None}
+    if tool_name == "run_skill_script":
+        args.setdefault("skill_name", "sandbox-page-analyst")
+        file_path = _normalize_skill_path(str(args.get("file_path") or ""))
+        if not file_path:
+            return None
+        args["file_path"] = file_path
+        if file_path == "scripts/sandbox_start.py" and not args.get("args"):
+            sandbox_args = _workflow_start_args_from_state(state)
+            if sandbox_args:
+                args["args"] = sandbox_args
+    return args
+
+
+def _workflow_start_args_from_state(state: Any) -> list[str]:
+    page = state.get(LAST_PAGE_WORKSPACE_STATE_KEY) if _is_state_like(state) else None
+    page_artifact = ""
+    source_url = ""
+    if isinstance(page, dict):
+        page_artifact = str(page.get("artifact_path") or page.get("page_artifact") or page.get("page_id") or "")
+        source_url = str(page.get("url") or "")
+    args = ["--mode", "workflow"]
+    if page_artifact:
+        args.extend(["--page-artifact", page_artifact])
+    if source_url:
+        args.extend(["--source-url", source_url])
+    return args
+
+
 def _active_repair_target_model_replacement(state: Any, llm_response: LlmResponse) -> LlmResponse | None:
     active = state.get(ACTIVE_SANDBOX_STATE_KEY) if _is_state_like(state) else None
     if not isinstance(active, dict):
@@ -4712,11 +4939,25 @@ def _inject_session_extraction_context(llm_request: LlmRequest, state: Any) -> N
                         "SESSION_EXTRACTION_CONTEXT until another non-context tool returns. Do not treat the update "
                         "confirmation itself as new evidence, and do not call update_extraction_context merely "
                         "because update_extraction_context succeeded.\n"
-                        "5. Use observations as page/workspace facts. Treat extraction_strategy as the current "
-                        "method for turning observed repeated job units into required outputs; follow it by "
-                        "default, enhance it when new evidence adds field/pattern detail, and revise it when "
-                        "new evidence or validation/finalization contradicts it. extraction_plan is the "
-                        "near-term work plan for gathering evidence and executing that strategy.\n"
+                        "5. Use observations as page/workspace facts. Treat extraction_plan as the adaptive plan "
+                        "created after early evidence; initial_plan is bootstrap-only and should be rebased into "
+                        "extraction_plan once evidence exists.\n"
+                        "5a. Treat extraction_strategy as the detailed method derived from extraction_plan for "
+                        "turning observed repeated job units into required outputs; follow it by default, enhance "
+                        "it when new evidence adds field/pattern detail, and revise it when new evidence or "
+                        "validation/finalization contradicts it.\n"
+                        "5b. Treat immediate_goal as the current bounded step inside extraction_strategy. "
+                        "initial_plan is not enough to write or run output/extractor.py. Before producer "
+                        "scripting, immediate_goal must state the current step with evidence, strategy, "
+                        "validation, and next script/probe objective. For the first ITviec fixture goal, establish "
+                        "and validate the repeated job-card unit boundary before field extraction or persistence "
+                        "claims. Good immediate_goal example: Establish repeated job-card unit boundary for the "
+                        "fixed ITviec fixture. Evidence: fixed page artifact, representative repeated card markup/text, "
+                        "and bounded selector/count evidence. Strategy: target one repeated job-card unit per "
+                        "in-scope listing using [data-search--pagination-target='jobCard'] and exclude "
+                        "navigation/company preview links. Validation: run a bounded count probe and pass only "
+                        "when the count is 20 for the fixture. Next script objective: write the smallest probe "
+                        "that counts repeated job units and records the unit boundary.\n"
                         "6. Use known_errors as active blockers only. If latest results show an error is solved, call "
                         "update_extraction_context with known_errors rewritten without that stale error.\n"
                         "7. Check attempted_actions before acting. Do not repeat actions that did not change state; "
@@ -4773,6 +5014,7 @@ def _inject_session_extraction_context(llm_request: LlmRequest, state: Any) -> N
 def _compact_session_context(context: dict[str, Any]) -> dict[str, Any]:
     if "immediate_goal" not in context and context.get("next_focus"):
         context = {**context, "immediate_goal": context.get("next_focus")}
+    include_initial_plan = not bool(context.get("extraction_plan"))
     allowed_keys = (
         "audit_id",
         "page_id",
@@ -4800,6 +5042,8 @@ def _compact_session_context(context: dict[str, Any]) -> dict[str, Any]:
     )
     compact: dict[str, Any] = {}
     for key in allowed_keys:
+        if key == "initial_plan" and not include_initial_plan:
+            continue
         if key not in context:
             continue
         value = context[key]

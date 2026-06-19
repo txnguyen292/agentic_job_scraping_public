@@ -24,6 +24,7 @@ dependencies = [
 
 [project.scripts]
 job-scraper = "job_scraper.cli:main"
+job-scraper-adk-dashboard = "job_scraper.adk_observability:main"
 job-scraper-public-export = "job_scraper.public_export:main"
 
 [tool.setuptools]

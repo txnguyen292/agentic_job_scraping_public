@@ -47,7 +47,7 @@ class ContextDoc:
         return extract_section(self.body, "Summary").strip()
 
     def meta(self) -> dict[str, Any]:
-        return {
+        payload = {
             "id": self.doc_id,
             "kind": self.kind,
             "title": self.title,
@@ -58,6 +58,13 @@ class ContextDoc:
             "related": stringify(ensure_list(self.frontmatter.get("related_docs"))),
             "path": str(self.path.relative_to(repo_root())),
         }
+        if self.frontmatter.get("linear_issue") is not None:
+            payload["linear_issue"] = self.frontmatter.get("linear_issue")
+        if self.frontmatter.get("linear_url") is not None:
+            payload["linear_url"] = self.frontmatter.get("linear_url")
+        if self.frontmatter.get("related_linear") is not None:
+            payload["related_linear"] = stringify(ensure_list(self.frontmatter.get("related_linear")))
+        return payload
 
 
 def repo_root() -> Path:
@@ -244,8 +251,77 @@ def collect_links(frontmatter: dict[str, Any]) -> dict[str, list[Any]]:
         "task_ids",
         "supersedes",
         "applies_to",
+        "external_links",
+        "related_linear",
     ]
     return {key: ensure_list(frontmatter.get(key)) for key in keys if ensure_list(frontmatter.get(key))}
+
+
+def first_nonempty(*values: Any) -> str:
+    for value in values:
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    return ""
+
+
+def default_linear_task_doc() -> ContextDoc:
+    handoff = find_doc("handoff")
+    active_task = first_nonempty(handoff.frontmatter.get("active_task"))
+    if active_task:
+        return find_doc(active_task)
+    for doc in all_docs():
+        if doc.kind == "task" and str(doc.frontmatter.get("status", "")).lower() in {"active", "in_progress", "blocked"}:
+            return doc
+    fail("no active task found for Linear update payload")
+    raise AssertionError("unreachable")
+
+
+def build_linear_update_payload(doc_id: str | None = None) -> dict[str, Any]:
+    handoff = find_doc("handoff")
+    task = find_doc(doc_id) if doc_id else default_linear_task_doc()
+    issue_id = first_nonempty(task.frontmatter.get("linear_issue"), handoff.frontmatter.get("linear_issue"))
+    issue_url = first_nonempty(task.frontmatter.get("linear_url"), handoff.frontmatter.get("linear_url"))
+    if not issue_id:
+        fail(f"{task.doc_id} has no linear_issue metadata; add linear_issue or choose another context doc")
+
+    verification = ensure_list(handoff.frontmatter.get("verification"))
+    risks = ensure_list(handoff.frontmatter.get("risks"))
+    touched_files = ensure_list(handoff.frontmatter.get("touched_files"))
+    task_summary = first_nonempty(task.frontmatter.get("summary"), task.summary)
+    handoff_summary = first_nonempty(handoff.frontmatter.get("summary"), handoff.summary)
+    next_step = first_nonempty(task.frontmatter.get("next_step"), handoff.frontmatter.get("next_step"))
+
+    lines = [
+        "### Project-context status update",
+        "",
+        f"- Context task: `{task.doc_id}`",
+        f"- Task summary: {task_summary}",
+        f"- Latest handoff: {handoff_summary}",
+        f"- Next step: {next_step or 'None recorded.'}",
+    ]
+    if touched_files:
+        lines.extend(["", "### Touched files", "", *[f"- `{item}`" for item in touched_files]])
+    if verification:
+        lines.extend(["", "### Verification", "", *[f"- {item}" for item in verification]])
+    if risks:
+        lines.extend(["", "### Risks / blockers", "", *[f"- {item}" for item in risks]])
+    lines.extend(
+        [
+            "",
+            "_Generated from repo-local project context. Post with the Linear connector, then append a `linear-update` lineage event._",
+        ]
+    )
+
+    return {
+        "issue_id": issue_id,
+        "issue_url": issue_url,
+        "source_docs": [task.doc_id, "handoff"],
+        "recommended_tool": "Linear create_comment/save_comment",
+        "body": "\n".join(lines).rstrip() + "\n",
+    }
 
 
 def validation_errors() -> list[str]:
@@ -343,6 +419,16 @@ def list_tasks(
         tasks.append(doc.meta())
     payload = {"items": tasks[:limit]}
     emit(payload, pretty)
+
+
+@app.command("linear_update_payload")
+def linear_update_payload(
+    doc_id: Optional[str] = typer.Argument(None, help="Context doc id. Defaults to handoff active_task."),
+    pretty: bool = typer.Option(False, help="Render pretty JSON."),
+    debug: bool = typer.Option(False, help="Enable debug logging."),
+) -> None:
+    configure_logging(debug)
+    emit(build_linear_update_payload(doc_id), pretty)
 
 
 @app.command("list_decisions")

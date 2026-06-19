@@ -1,0 +1,100 @@
+{
+  "criteria": {
+    "rubric_based_tool_use_quality_v1": {
+      "threshold": 0.85,
+      "judge_model_options": {
+        "judge_model": "openai/gpt-5.4-mini",
+        "num_samples": 1
+      },
+      "rubrics": [
+        {
+          "rubric_id": "uses_fixture_artifact",
+          "rubric_content": {
+            "text_property": "The agent uses the fixed fixture as a page artifact or sandbox-mounted file and does not ask the model to ingest full raw HTML. Evaluator rationale instruction, not an agent-response requirement: when you write your rationale, include a `Trace anchors:` clause citing `invocation_events[N]`, `final_response`, or `none found for <claim>`. Do not score the agent on whether it wrote trace anchors."
+          }
+        },
+        {
+          "rubric_id": "adapts_initial_plan_into_extraction_plan",
+          "rubric_content": {
+            "text_property": "After early page evidence, the agent adapts the bootstrap initial_plan into extraction_plan and no longer treats initial_plan as live guidance. Evaluator rationale instruction, not an agent-response requirement: when you write your rationale, include a `Trace anchors:` clause citing `invocation_events[N]`, `final_response`, or `none found for <claim>`. Do not score the agent on whether it wrote trace anchors."
+          }
+        },
+        {
+          "rubric_id": "derives_strategy_from_plan",
+          "rubric_content": {
+            "text_property": "The agent derives extraction_strategy from extraction_plan, using it as the detailed method for evidence, unit boundaries, field patterns, validation, and revision. Evaluator rationale instruction, not an agent-response requirement: when you write your rationale, include a `Trace anchors:` clause citing `invocation_events[N]`, `final_response`, or `none found for <claim>`. Do not score the agent on whether it wrote trace anchors."
+          }
+        },
+        {
+          "rubric_id": "records_immediate_goal_before_producer",
+          "rubric_content": {
+            "text_property": "Before writing or running extraction producer code such as output/extractor.py, the agent records an immediate_goal that names the current extraction_strategy step with evidence, strategy, validation, and next script/probe objective. Evaluator rationale instruction, not an agent-response requirement: when you write your rationale, include a `Trace anchors:` clause. Cite concrete anchors present in the invocation, using `invocation_events[N]` for tool/context events where N is the zero-based index from actual_invocation.intermediate_data.invocation_events, and `final_response` for final-answer text. If scoring below 1.0, cite the producer event or producer-output intent, the nearest relevant immediate_goal event(s), and what is missing; if no supporting event exists, write `Trace anchors: none found for <claim>`. Do not lower the score merely because the agent did not write trace anchors; trace anchors are required only in your judge rationale."
+          }
+        },
+        {
+          "rubric_id": "validates_incremental_goal_only",
+          "rubric_content": {
+            "text_property": "The agent validates only the current incremental goal with bounded probes, such as repeated job-card unit boundary and count, rather than attempting full extraction or persistence. Evaluator rationale instruction, not an agent-response requirement: when you write your rationale, include a `Trace anchors:` clause citing `invocation_events[N]`, `final_response`, or `none found for <claim>`. Do not score the agent on whether it wrote trace anchors."
+          }
+        },
+        {
+          "rubric_id": "keeps_tool_use_grounded",
+          "rubric_content": {
+            "text_property": "Tool calls follow from the latest evidence and session context; errors or command-shape corrections are reconciled before continuing. Evaluator rationale instruction, not an agent-response requirement: when you write your rationale, include a `Trace anchors:` clause citing `invocation_events[N]`, `final_response`, or `none found for <claim>`. Do not score the agent on whether it wrote trace anchors."
+          }
+        }
+      ]
+    },
+    "rubric_based_final_response_quality_v1": {
+      "threshold": 0.85,
+      "judge_model_options": {
+        "judge_model": "openai/gpt-5.4-mini",
+        "num_samples": 1
+      },
+      "rubrics": [
+        {
+          "rubric_id": "truthful_scope",
+          "rubric_content": {
+            "text_property": "The final response states the current goal status and does not claim full extraction or persistence."
+          }
+        },
+        {
+          "rubric_id": "reports_boundary_evidence",
+          "rubric_content": {
+            "text_property": "If boundary evidence was validated, the final response reports the boundary and job count."
+          }
+        },
+        {
+          "rubric_id": "names_next_goal",
+          "rubric_content": {
+            "text_property": "The final response names the next incremental extraction goal."
+          }
+        },
+        {
+          "rubric_id": "compact_and_grounded",
+          "rubric_content": {
+            "text_property": "The final response is compact and avoids raw HTML, long logs, or large JSON payloads."
+          }
+        },
+        {
+          "rubric_id": "grounded_final_claims_with_evidence",
+          "rubric_content": {
+            "text_property": "All final-response claims about validation, extraction, blockers, and next steps are supported by tool evidence."
+          }
+        },
+        {
+          "rubric_id": "no_completion_claim_without_tool_evidence",
+          "rubric_content": {
+            "text_property": "The final response does not claim completion without matching successful tool evidence."
+          }
+        },
+        {
+          "rubric_id": "reports_only_supported_missing_artifacts",
+          "rubric_content": {
+            "text_property": "Missing-artifact claims in the final response are supported by direct tool evidence."
+          }
+        }
+      ]
+    }
+  }
+}

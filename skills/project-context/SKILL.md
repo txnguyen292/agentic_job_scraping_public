@@ -118,7 +118,7 @@ Rules:
 7. Decide whether the minimal context is sufficient.
 8. Use `load_resource` or other metadata-first commands only when the current context is not enough.
 9. For large deltas, use working-context checkpoints before important state is lost.
-10. After meaningful work, update context through the write commands, then validate the result.
+10. After meaningful work, update context through the write commands, sync any linked Linear ticket, then validate the result.
 
 ## Read Budget
 
@@ -159,6 +159,7 @@ Suggested write commands:
 - `update_working_context`
 - `clear_working_context`
 - `append_lineage`
+- `linear_update_payload`
 - `validate_context`
 
 ## Environment Convention
@@ -180,7 +181,8 @@ Suggested write commands:
 6. Do the work.
 7. If the delta is large and context-loss risk becomes meaningful, write a short checkpoint to working context.
 8. Update context through the write tools.
-9. Validate the context state.
+9. If the active context has `linear_issue` metadata, prepare and post a Linear ticket update.
+10. Validate the context state.
 
 ## Update Rules
 
@@ -193,8 +195,21 @@ Suggested write commands:
 - Use handoff records for the operational snapshot a future agent needs to resume safely.
 - Use working checkpoints for temporary memory during large deltas.
 - Use append-only lineage/history for meaningful state changes that should remain auditable.
+- If the active task or handoff has `linear_issue`/`linear_url`, keep that Linear ticket aligned after meaningful work.
 - Create or update a decision doc only when a real decision changed.
 - Use the write tools instead of editing `.contexts/` files directly when the tools are available.
+
+## Linear Ticket Sync
+
+When a task or handoff has `linear_issue` or `linear_url` frontmatter, update Linear after meaningful work.
+
+1. Update the repo-local task, handoff, and lineage first.
+2. Run `.contexts/bin/linear_update_payload <task-id>` or omit the task id to use `handoff.active_task`.
+3. Post the returned `body` to the returned `issue_id` with the Linear connector comment tool.
+4. Append a `linear-update` lineage event with the issue id or URL.
+5. If Linear tools are unavailable or fail, record that blocker in handoff and lineage instead of silently dropping the update.
+
+The local context tool only prepares the payload because project scripts cannot call Codex MCP/app tools directly. The agent is responsible for using the Linear plugin when it is available.
 
 ## Context Recording Strategy
 
