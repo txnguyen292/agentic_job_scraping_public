@@ -7,7 +7,7 @@ Planning documents and report templates live under `plans/`, not here.
 ## Current Artifacts
 
 - `adk-eval-dashboard.html` can be generated from ADK eval history with:
-  `uv run python -m scripts.adk_eval_dashboard --input src/.adk/eval_history --output reports/adk-eval-dashboard.html`
+  `uv run python scripts/adk_eval_dashboard.py --input src/.adk/eval_history --output reports/adk-eval-dashboard.html`
 - `adk-token-dashboard.html` is the ADK Observability companion dashboard for
   local session stores. It shows cached input, non-cached input, output,
   reasoning, session drill-down, and ChatCompletion details:

@@ -1,15 +1,19 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 import sqlite3
 from pathlib import Path
 
 import pytest
 
-from scripts import adk_token_dashboard
 
-
-MODULE_PATH = Path(adk_token_dashboard.__file__)
+MODULE_PATH = Path(__file__).resolve().parents[1] / "scripts" / "adk_token_dashboard.py"
+SPEC = importlib.util.spec_from_file_location("adk_token_dashboard", MODULE_PATH)
+assert SPEC is not None
+adk_token_dashboard = importlib.util.module_from_spec(SPEC)
+assert SPEC.loader is not None
+SPEC.loader.exec_module(adk_token_dashboard)
 
 
 def _make_session_db(path: Path) -> None:
