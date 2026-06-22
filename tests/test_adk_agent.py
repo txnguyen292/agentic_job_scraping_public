@@ -69,6 +69,9 @@ def test_runtime_registers_project_context_and_sandbox_skills() -> None:
 
 
 def test_project_context_runtime_skill_exposes_observation_notebook_script() -> None:
+    if not Path(".contexts").exists():
+        pytest.skip("private .contexts state is intentionally omitted from the public export")
+
     skill_text = Path("skills/project-context/SKILL.md").read_text(encoding="utf-8")
     sandbox_reference_path = Path("skills/project-context/references/sandbox-runtime.md")
     record_script_path = Path("skills/project-context/scripts/record_observation.py")
