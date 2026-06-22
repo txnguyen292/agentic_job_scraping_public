@@ -32,6 +32,19 @@ def test_build_export_plan_uses_allowlist_and_excludes_private_paths(tmp_path: P
     assert [path.as_posix() for path in plan.files] == ["README.md", "src/job_scraper/app.py"]
 
 
+def test_repo_public_export_keeps_private_dashboards_out_and_public_test_deps_in() -> None:
+    config = PublicExportConfig.from_file("public_export.toml")
+    plan = build_export_plan(".", config)
+    exported_files = {path.as_posix() for path in plan.files}
+
+    assert "tests/test_adk_eval_dashboard.py" not in exported_files
+    assert "scripts/adk_eval_dashboard.py" not in exported_files
+    assert "scripts/adk_eval_dashboard.template.html" not in exported_files
+    assert "scripts/utils.py" not in exported_files
+    assert "tests/test_linear_release_ledger.py" in exported_files
+    assert "scripts/linear_release_ledger.py" in exported_files
+
+
 def test_sync_public_tree_preserves_destination_git_and_verifies(tmp_path: Path) -> None:
     source = tmp_path / "source"
     destination = tmp_path / "public"
