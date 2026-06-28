@@ -21,6 +21,29 @@ class ToolActionKind(StrEnum):
     DATABASE_READ = "database_read"
 
 
+class ToolName(StrEnum):
+    """Known ADK tool names used by runtime policy plugins."""
+
+    UPDATE_EXTRACTION_CONTEXT = "update_extraction_context"
+    LIST_SKILLS = "list_skills"
+    LOAD_SKILL = "load_skill"
+    LOAD_SKILL_RESOURCE = "load_skill_resource"
+    LIST_SKILL_RESOURCES = "list_skill_resources"
+    FETCH_PAGE = "fetch_page"
+    RENDER_PAGE = "render_page"
+    FETCH_PAGE_TO_WORKSPACE = "fetch_page_to_workspace"
+    RENDER_PAGE_TO_WORKSPACE = "render_page_to_workspace"
+    LOAD_TEST_FIXTURE_PAGE_TO_WORKSPACE = "load_test_fixture_page_to_workspace"
+    PROMOTE_SANDBOX_EXTRACTION = "promote_sandbox_extraction"
+    PERSIST_SANDBOX_JOB_EXTRACTION = "persist_sandbox_job_extraction"
+    UPSERT_JOB = "upsert_job"
+    RECORD_CRAWL_RUN = "record_crawl_run"
+    QUERY_JOBS = "query_jobs"
+    LIST_SEED_REFERENCES = "list_seed_references"
+    RUN_SANDBOX_AGENT = "run_sandbox_agent"
+    RUN_SKILL_SCRIPT = "run_skill_script"
+
+
 @dataclass(frozen=True)
 class ToolPolicy:
     """Runtime policy metadata for one tool invocation."""
@@ -43,78 +66,78 @@ UNKNOWN_TOOL_POLICY = ToolPolicy(
 
 
 STATIC_TOOL_POLICIES: dict[str, ToolPolicy] = {
-    "update_extraction_context": ToolPolicy(
+    ToolName.UPDATE_EXTRACTION_CONTEXT: ToolPolicy(
         kind=ToolActionKind.NOTEBOOK,
         counts_as_intervening_action=False,
     ),
-    "list_skills": ToolPolicy(
+    ToolName.LIST_SKILLS: ToolPolicy(
         kind=ToolActionKind.REFERENCE_READ,
         counts_as_intervening_action=True,
     ),
-    "load_skill": ToolPolicy(
+    ToolName.LOAD_SKILL: ToolPolicy(
         kind=ToolActionKind.REFERENCE_READ,
         counts_as_intervening_action=True,
     ),
-    "load_skill_resource": ToolPolicy(
+    ToolName.LOAD_SKILL_RESOURCE: ToolPolicy(
         kind=ToolActionKind.REFERENCE_READ,
         counts_as_intervening_action=True,
     ),
-    "list_skill_resources": ToolPolicy(
+    ToolName.LIST_SKILL_RESOURCES: ToolPolicy(
         kind=ToolActionKind.REFERENCE_READ,
         counts_as_intervening_action=True,
     ),
-    "fetch_page": ToolPolicy(
+    ToolName.FETCH_PAGE: ToolPolicy(
         kind=ToolActionKind.WORKSPACE_READ,
         counts_as_intervening_action=True,
     ),
-    "render_page": ToolPolicy(
+    ToolName.RENDER_PAGE: ToolPolicy(
         kind=ToolActionKind.WORKSPACE_READ,
         counts_as_intervening_action=True,
     ),
-    "fetch_page_to_workspace": ToolPolicy(
+    ToolName.FETCH_PAGE_TO_WORKSPACE: ToolPolicy(
         kind=ToolActionKind.WORKFLOW_ACTION,
         counts_as_intervening_action=True,
         changes_workflow_output=True,
     ),
-    "render_page_to_workspace": ToolPolicy(
+    ToolName.RENDER_PAGE_TO_WORKSPACE: ToolPolicy(
         kind=ToolActionKind.WORKFLOW_ACTION,
         counts_as_intervening_action=True,
         changes_workflow_output=True,
     ),
-    "load_test_fixture_page_to_workspace": ToolPolicy(
+    ToolName.LOAD_TEST_FIXTURE_PAGE_TO_WORKSPACE: ToolPolicy(
         kind=ToolActionKind.WORKFLOW_ACTION,
         counts_as_intervening_action=True,
         changes_workflow_output=True,
     ),
-    "promote_sandbox_extraction": ToolPolicy(
+    ToolName.PROMOTE_SANDBOX_EXTRACTION: ToolPolicy(
         kind=ToolActionKind.PERSISTENCE_ACTION,
         counts_as_intervening_action=True,
         changes_workflow_output=True,
     ),
-    "persist_sandbox_job_extraction": ToolPolicy(
+    ToolName.PERSIST_SANDBOX_JOB_EXTRACTION: ToolPolicy(
         kind=ToolActionKind.PERSISTENCE_ACTION,
         counts_as_intervening_action=True,
         changes_workflow_output=True,
     ),
-    "upsert_job": ToolPolicy(
+    ToolName.UPSERT_JOB: ToolPolicy(
         kind=ToolActionKind.PERSISTENCE_ACTION,
         counts_as_intervening_action=True,
         changes_workflow_output=True,
     ),
-    "record_crawl_run": ToolPolicy(
+    ToolName.RECORD_CRAWL_RUN: ToolPolicy(
         kind=ToolActionKind.PERSISTENCE_ACTION,
         counts_as_intervening_action=True,
         changes_workflow_output=True,
     ),
-    "query_jobs": ToolPolicy(
+    ToolName.QUERY_JOBS: ToolPolicy(
         kind=ToolActionKind.DATABASE_READ,
         counts_as_intervening_action=True,
     ),
-    "list_seed_references": ToolPolicy(
+    ToolName.LIST_SEED_REFERENCES: ToolPolicy(
         kind=ToolActionKind.REFERENCE_READ,
         counts_as_intervening_action=True,
     ),
-    "run_sandbox_agent": ToolPolicy(
+    ToolName.RUN_SANDBOX_AGENT: ToolPolicy(
         kind=ToolActionKind.WORKFLOW_ACTION,
         counts_as_intervening_action=True,
         changes_workflow_output=True,
@@ -177,7 +200,7 @@ def resolve_tool_policy(tool_name: str, tool_args: dict[str, Any] | None = None)
     """Resolve policy metadata for a concrete tool invocation."""
 
     tool_args = tool_args or {}
-    if tool_name == "run_skill_script":
+    if tool_name == ToolName.RUN_SKILL_SCRIPT:
         file_path = _normalize_skill_path(str(tool_args.get("file_path") or ""))
         return SANDBOX_SCRIPT_POLICIES.get(
             file_path,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -224,6 +225,69 @@ class FakeInvocationContext:
 
 async def _noop_sleep(delay: float) -> None:
     return None
+
+
+def test_transient_model_retry_plugin_facade_matches_focused_module() -> None:
+    focused_module = importlib.import_module("job_scraper.adk_plugin_modules.transient_retry")
+
+    assert TransientModelRetryPlugin is focused_module.TransientModelRetryPlugin
+
+
+def test_model_reasoning_telemetry_plugin_facade_matches_focused_module() -> None:
+    from job_scraper.adk_plugins import ModelReasoningTelemetryPlugin
+
+    focused_module = importlib.import_module("job_scraper.adk_plugin_modules.reasoning_telemetry")
+
+    assert ModelReasoningTelemetryPlugin is focused_module.ModelReasoningTelemetryPlugin
+
+
+def test_sandbox_output_gate_plugin_facade_matches_focused_module() -> None:
+    focused_module = importlib.import_module("job_scraper.adk_plugin_modules.output_gate")
+
+    assert SandboxOutputGatePlugin is focused_module.SandboxOutputGatePlugin
+
+
+def test_sandbox_note_refinement_plugin_facade_matches_focused_module() -> None:
+    focused_module = importlib.import_module("job_scraper.adk_plugin_modules.note_refinement")
+
+    assert SandboxNoteRefinementPlugin is focused_module.SandboxNoteRefinementPlugin
+
+
+def test_sandbox_workflow_guard_plugin_facade_matches_focused_module() -> None:
+    focused_module = importlib.import_module("job_scraper.adk_plugin_modules.sandbox_guard")
+
+    assert SandboxWorkflowGuardPlugin is focused_module.SandboxWorkflowGuardPlugin
+
+
+def test_sandbox_guard_artifact_helpers_facade_match_focused_module() -> None:
+    focused_module = importlib.import_module("job_scraper.adk_plugin_modules.sandbox_guard.artifacts")
+    facade_module = importlib.import_module("job_scraper.adk_plugins")
+
+    assert facade_module._persist_artifact_sources is focused_module._persist_artifact_sources
+    assert facade_module._compact_output_paths is focused_module._compact_output_paths
+
+
+def test_sandbox_guard_compaction_helpers_facade_match_focused_module() -> None:
+    focused_module = importlib.import_module("job_scraper.adk_plugin_modules.sandbox_guard.compaction")
+    facade_module = importlib.import_module("job_scraper.adk_plugins")
+
+    assert facade_module._workflow_tool_event_note_source is focused_module._workflow_tool_event_note_source
+    assert facade_module._compact_run_skill_script_result is focused_module._compact_run_skill_script_result
+
+
+def test_tool_name_enum_is_facade_exported_and_string_compatible() -> None:
+    facade_module = importlib.import_module("job_scraper.adk_plugins")
+    policy_module = importlib.import_module("job_scraper.tool_policy")
+
+    assert facade_module.ToolName is policy_module.ToolName
+    assert facade_module.ToolName.RUN_SKILL_SCRIPT == "run_skill_script"
+    assert (
+        resolve_tool_policy(
+            facade_module.ToolName.RUN_SKILL_SCRIPT,
+            {"file_path": "scripts/sandbox_exec.py"},
+        ).kind
+        == ToolActionKind.SANDBOX_EXEC
+    )
 
 
 def _model_response(text: str) -> LlmResponse:
