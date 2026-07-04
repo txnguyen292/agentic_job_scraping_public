@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import asyncio
 import hashlib
-import inspect
 import json
 import os
 import re
@@ -12,13 +10,84 @@ from typing import Any
 
 from google.adk.models.llm_request import LlmRequest
 from google.adk.models.llm_response import LlmResponse
-from google.adk.plugins.base_plugin import BasePlugin
 from google.genai import types as genai_types
 
+from job_scraper.adk_plugin_modules.reasoning_telemetry import (
+    MODEL_REASONING_TELEMETRY_STATE_KEY,
+    ModelReasoningTelemetryPlugin,
+    _attach_reasoning_telemetry_to_model_event,
+    _llm_response_thought_texts,
+    _model_reasoning_telemetry,
+    _reasoning_telemetry_display_text,
+    _surface_reasoning_telemetry_as_adk_web_thought,
+)
+from job_scraper.adk_plugin_modules.note_refinement import (
+    DEFAULT_NOTE_REFINEMENT_MODEL,
+    SANDBOX_NOTE_BUFFER_STATE_KEY,
+    SANDBOX_NOTE_ERROR_STATE_KEY,
+    SANDBOX_NOTES_STATE_KEY,
+    SANDBOX_SUMMARIZED_COMMANDS_STATE_KEY,
+    WORKFLOW_EVENT_GROUP,
+    WORKFLOW_EVENT_SEQUENCE_STATE_KEY,
+    WORKFLOW_SUMMARIZED_EVENTS_STATE_KEY,
+    SandboxNoteRefinementPlugin,
+)
+from job_scraper.adk_plugin_modules.output_gate import SandboxOutputGatePlugin
+from job_scraper.adk_plugin_modules.sandbox_guard import SandboxWorkflowGuardPlugin
+from job_scraper.adk_plugin_modules.sandbox_guard.artifacts import (
+    _add_versioned_artifact_handles_to_promotion,
+    _collect_artifact_sources,
+    _compact_artifact_handles,
+    _compact_output_paths,
+    _persist_artifact_sources,
+    _record_sandbox_artifact_handles,
+    _safe_adk_artifact_name,
+    _versioned_artifact_handles_for_audit,
+)
+from job_scraper.adk_plugin_modules.sandbox_guard.compaction import (
+    _compact_run_skill_script_result,
+    _compact_sandbox_response,
+    _completed_sandbox_audits,
+    _completed_sandbox_placeholder,
+    _is_workflow_note_tool,
+    _latest_note_by_audit,
+    _looks_like_sandbox_payload,
+    _mark_summarized_commands,
+    _mark_summarized_workflow_events,
+    _prune_completed_sandbox_contexts,
+    _prune_summarized_sandbox_contexts,
+    _prune_summarized_workflow_events,
+    _sandbox_command_note_source,
+    _sandbox_command_sort_key,
+    _summarized_sandbox_placeholder,
+    _summarized_workflow_event_placeholder,
+    _workflow_event_sort_key,
+    _workflow_tool_event_note_source,
+)
+from job_scraper.adk_plugin_modules.transient_retry import (
+    MODEL_RETRY_BASE_DELAY_SECONDS,
+    MODEL_RETRY_MAX_ATTEMPTS,
+    MODEL_RETRY_MAX_DELAY_SECONDS,
+    TransientModelRetryPlugin,
+    _is_transient_model_error,
+    _model_retry_exhausted_response,
+    _retry_delay_from_error,
+)
 from job_scraper.sandbox_terminal import SandboxRegistry
 from job_scraper.runtime_state import SESSION_EXTRACTION_CONTEXT_STATE_KEY
-from job_scraper.tool_policy import ToolActionKind, resolve_tool_policy
-from sandbox_page_analyst.runtime import validate_job_extraction_payload
+from job_scraper.runtime_payload import (
+    EXTRACTION_CONTEXT_DIGEST_KEYS,
+    LATEST_PAYLOAD_KEYS,
+    PROMOTED_SCRIPT_PAYLOAD_ERROR_KEYS,
+    RESOURCE_PLACEHOLDER_KEYS,
+    RESOURCE_TEXT_PAYLOAD_KEYS,
+    SANDBOX_TEXT_PREVIEW_KEYS,
+    SESSION_CONTEXT_COMPACT_KEYS,
+    RuntimePayloadKey,
+    RuntimeStatus,
+    SessionContextKey,
+)
+from job_scraper.tool_policy import ToolActionKind, ToolName, resolve_tool_policy
 
 
 ACTIVE_SANDBOX_STATE_KEY = "_job_scraper_active_sandbox"
@@ -27,13 +96,6 @@ SANDBOX_PENDING_SCRIPT_STATE_KEY = "_job_scraper_pending_sandbox_scripts"
 SANDBOX_REPEAT_GUARD_STATE_KEY = "_job_scraper_repeat_guard"
 SANDBOX_MODE_RESOURCE_STATE_KEY = "_job_scraper_sandbox_mode_resource"
 SANDBOX_SITE_RESOURCE_STATE_KEY = "_job_scraper_sandbox_site_resources"
-SANDBOX_NOTE_BUFFER_STATE_KEY = "_job_scraper_sandbox_note_buffer"
-SANDBOX_NOTES_STATE_KEY = "_job_scraper_sandbox_notes"
-SANDBOX_NOTE_ERROR_STATE_KEY = "_job_scraper_sandbox_note_errors"
-SANDBOX_SUMMARIZED_COMMANDS_STATE_KEY = "_job_scraper_sandbox_summarized_commands"
-WORKFLOW_EVENT_SEQUENCE_STATE_KEY = "_job_scraper_workflow_event_sequence"
-WORKFLOW_SUMMARIZED_EVENTS_STATE_KEY = "_job_scraper_workflow_summarized_events"
-WORKFLOW_EVENT_GROUP = "workflow"
 EXTRACTION_CONTEXT_UPDATE_GUARD_STATE_KEY = "_job_scraper_extraction_context_update_guard"
 SANDBOX_TOOL_BUDGET_STATE_KEY = "_job_scraper_sandbox_tool_budget"
 SANDBOX_READ_GUARD_STATE_KEY = "_job_scraper_sandbox_read_guard"
@@ -41,33 +103,23 @@ INSPECTION_REPEAT_GUARD_STATE_KEY = "_job_scraper_inspection_repeat_guard"
 IMMEDIATE_ERROR_REPEAT_STATE_KEY = "_job_scraper_immediate_error_repeat"
 SANDBOX_ARTIFACT_HANDLES_STATE_KEY = "_job_scraper_sandbox_artifact_handles"
 FINALIZED_SANDBOX_PROMOTION_STATE_KEY = "_job_scraper_finalized_sandbox_promotion"
-MODEL_REASONING_TELEMETRY_STATE_KEY = "_job_scraper_model_reasoning"
-EPHEMERAL_RESOURCE_TOOL_NAMES = {"load_skill", "load_skill_resource"}
+EPHEMERAL_RESOURCE_TOOL_NAMES = {ToolName.LOAD_SKILL, ToolName.LOAD_SKILL_RESOURCE}
 INITIAL_CONTEXT_REQUIRED_TOOLS = {
-    "list_skills",
-    "load_skill",
-    "fetch_page",
-    "render_page",
-    "fetch_page_to_workspace",
-    "render_page_to_workspace",
-    "load_test_fixture_page_to_workspace",
-    "promote_sandbox_extraction",
-    "upsert_job",
-    "record_crawl_run",
-    "query_jobs",
-    "list_seed_references",
+    ToolName.LIST_SKILLS,
+    ToolName.LOAD_SKILL,
+    ToolName.FETCH_PAGE,
+    ToolName.RENDER_PAGE,
+    ToolName.FETCH_PAGE_TO_WORKSPACE,
+    ToolName.RENDER_PAGE_TO_WORKSPACE,
+    ToolName.LOAD_TEST_FIXTURE_PAGE_TO_WORKSPACE,
+    ToolName.PROMOTE_SANDBOX_EXTRACTION,
+    ToolName.UPSERT_JOB,
+    ToolName.RECORD_CRAWL_RUN,
+    ToolName.QUERY_JOBS,
+    ToolName.LIST_SEED_REFERENCES,
 }
 DEFAULT_SANDBOX_APP_ROOT = Path(__file__).resolve().parent
-DEFAULT_NOTE_REFINEMENT_MODEL = (
-    os.getenv("SANDBOX_NOTE_REFINEMENT_MODEL")
-    or os.getenv("JOB_SCRAPER_LLM_MODEL")
-    or os.getenv("OPENAI_MODEL")
-    or "openai/gpt-5.4-mini"
-)
 MAX_WORKFLOW_SANDBOX_TOOL_CALLS = int(os.getenv("JOB_SCRAPER_MAX_WORKFLOW_SANDBOX_TOOL_CALLS", "20"))
-MODEL_RETRY_MAX_ATTEMPTS = int(os.getenv("JOB_SCRAPER_MODEL_RETRY_MAX_ATTEMPTS", "6"))
-MODEL_RETRY_BASE_DELAY_SECONDS = float(os.getenv("JOB_SCRAPER_MODEL_RETRY_BASE_DELAY_SECONDS", "15"))
-MODEL_RETRY_MAX_DELAY_SECONDS = float(os.getenv("JOB_SCRAPER_MODEL_RETRY_MAX_DELAY_SECONDS", "90"))
 SANDBOX_MODE_RESOURCES = {
     "references/diagnostic-mode.md": "diagnostic",
     "references/workflow-mode.md": "workflow",
@@ -143,905 +195,6 @@ def _state_pop(state: Any, key: str, default: Any = None) -> Any:
         return value
     except TypeError:
         return default
-
-
-class TransientModelRetryPlugin(BasePlugin):
-    """Retry transient model provider failures before ADK Web surfaces them."""
-
-    def __init__(
-        self,
-        *,
-        max_attempts: int = MODEL_RETRY_MAX_ATTEMPTS,
-        base_delay_seconds: float = MODEL_RETRY_BASE_DELAY_SECONDS,
-        max_delay_seconds: float = MODEL_RETRY_MAX_DELAY_SECONDS,
-        sleep: Any = asyncio.sleep,
-        name: str = "transient_model_retry_plugin",
-    ) -> None:
-        super().__init__(name=name)
-        self.max_attempts = max(1, max_attempts)
-        self.base_delay_seconds = max(0.0, base_delay_seconds)
-        self.max_delay_seconds = max(self.base_delay_seconds, max_delay_seconds)
-        self.sleep = sleep
-
-    async def on_model_error_callback(
-        self,
-        *,
-        callback_context: Any,
-        llm_request: LlmRequest,
-        error: Exception,
-    ) -> LlmResponse | None:
-        if not _is_transient_model_error(error):
-            return None
-
-        invocation_context = getattr(callback_context, "_invocation_context", None)
-        agent = getattr(invocation_context, "agent", None)
-        model = getattr(agent, "model", None)
-        if model is None or not callable(getattr(model, "generate_content_async", None)):
-            return _model_retry_exhausted_response(
-                error,
-                attempts=0,
-                detail="No retryable model object was available in the ADK invocation context.",
-            )
-
-        last_error: Exception = error
-        retry_attempts = max(0, self.max_attempts - 1)
-        for attempt in range(1, retry_attempts + 1):
-            delay_seconds = self._delay_for_attempt(attempt, last_error)
-            await self._sleep(delay_seconds)
-            try:
-                increment = getattr(invocation_context, "increment_llm_call_count", None)
-                if callable(increment):
-                    increment()
-                async for response in model.generate_content_async(
-                    llm_request,
-                    stream=False,
-                ):
-                    return response
-            except Exception as exc:
-                last_error = exc
-                if not _is_transient_model_error(exc):
-                    return None
-
-        return _model_retry_exhausted_response(
-            last_error,
-            attempts=retry_attempts,
-            detail=(
-                "Transient model provider errors persisted after bounded retries. "
-                "Retry the user request later or lower request volume."
-            ),
-        )
-
-    async def _sleep(self, delay_seconds: float) -> None:
-        maybe = self.sleep(delay_seconds)
-        if inspect.isawaitable(maybe):
-            await maybe
-
-    def _delay_for_attempt(self, attempt: int, error: Exception) -> float:
-        hinted_delay = _retry_delay_from_error(error)
-        fallback = min(self.max_delay_seconds, self.base_delay_seconds * (2 ** max(0, attempt - 1)))
-        if hinted_delay is None:
-            return fallback
-        return min(self.max_delay_seconds, max(self.base_delay_seconds, hinted_delay))
-
-
-class ModelReasoningTelemetryPlugin(BasePlugin):
-    """Expose compact model reasoning signals as ADK Web-visible state."""
-
-    def __init__(
-        self,
-        *,
-        reasoning_effort: str | None = None,
-        preview_max_chars: int = 500,
-        surface_in_adk_web: bool = True,
-        name: str = "model_reasoning_telemetry_plugin",
-    ) -> None:
-        super().__init__(name=name)
-        self.reasoning_effort = reasoning_effort or os.getenv("JOB_SCRAPER_REASONING_EFFORT") or ""
-        self.preview_max_chars = max(0, preview_max_chars)
-        self.surface_in_adk_web = surface_in_adk_web
-
-    async def after_model_callback(
-        self,
-        *,
-        callback_context: Any,
-        llm_response: LlmResponse,
-    ) -> LlmResponse | None:
-        state = getattr(callback_context, "state", None)
-        if not _is_state_like(state):
-            return None
-        telemetry = _model_reasoning_telemetry(
-            llm_response,
-            reasoning_effort=self.reasoning_effort,
-            preview_max_chars=self.preview_max_chars,
-        )
-        if telemetry:
-            state[MODEL_REASONING_TELEMETRY_STATE_KEY] = telemetry
-            _attach_reasoning_telemetry_to_model_event(llm_response, telemetry)
-            if self.surface_in_adk_web:
-                _surface_reasoning_telemetry_as_adk_web_thought(llm_response, telemetry)
-        return None
-
-
-class SandboxWorkflowGuardPlugin(BasePlugin):
-    """Prevent a started sandbox from becoming a premature final answer."""
-
-    def __init__(self, *, max_forced_continuations: int = 0, name: str = "sandbox_workflow_guard_plugin") -> None:
-        super().__init__(name=name)
-        # Kept for compatibility with older tests/config, but the guard no
-        # longer spends sandbox command budget by auto-invoking tools.
-        self.max_forced_continuations = max_forced_continuations
-
-    async def before_tool_callback(
-        self,
-        *,
-        tool: Any,
-        tool_args: dict[str, Any],
-        tool_context: Any,
-    ) -> dict | None:
-        tool_name = getattr(tool, "name", "")
-        initial_context_error = _initial_extraction_context_policy_error(tool_name, tool_args, tool_context)
-        if initial_context_error:
-            return initial_context_error
-        workflow_contract_error = _workflow_contract_policy_error(tool_name, tool_args, tool_context)
-        if workflow_contract_error:
-            return workflow_contract_error
-        immediate_goal_error = _immediate_goal_policy_error(tool_name, tool_args, tool_context)
-        if immediate_goal_error:
-            return immediate_goal_error
-        repair_scope_error = _repair_scope_policy_error(tool_name, tool_args, tool_context)
-        if repair_scope_error:
-            return repair_scope_error
-        planned_next_tool_error = _planned_next_tool_policy_error(tool_name, tool_args, tool_context)
-        if planned_next_tool_error:
-            return planned_next_tool_error
-        immediate_repeat_error = _immediate_repeated_error_policy_error(tool_name, tool_args, tool_context)
-        if immediate_repeat_error:
-            return immediate_repeat_error
-        repeated_inspection_error = _repeated_inspection_policy_error(tool_name, tool_args, tool_context)
-        if repeated_inspection_error:
-            return repeated_inspection_error
-        terminal_error = _active_sandbox_guardrail_terminal_error(tool_name, tool_args, tool_context)
-        if terminal_error:
-            return terminal_error
-        budget_error = _workflow_sandbox_tool_budget_error(tool_name, tool_args, tool_context)
-        if budget_error:
-            return budget_error
-
-        if tool_name == "load_skill_resource":
-            mode_resource_error = _sandbox_mode_resource_policy_error(tool_args, tool_context)
-            if mode_resource_error:
-                return mode_resource_error
-            _record_sandbox_site_resource_load(tool_args, tool_context)
-            return None
-
-        if tool_name == "update_extraction_context":
-            return _extraction_context_update_policy_error(tool_args, tool_context)
-
-        if tool_name == "run_skill_script":
-            wrong_skill_error = _wrong_sandbox_helper_skill_policy_error(tool_args)
-            if wrong_skill_error:
-                return wrong_skill_error
-            site_reference_error = _site_specific_reference_policy_error(tool_args, tool_context)
-            if site_reference_error:
-                return site_reference_error
-            script_args_error = _sandbox_skill_script_args_policy_error(tool_args, tool_context)
-            if script_args_error:
-                return script_args_error
-            repeated_read_error = _repeated_sandbox_read_policy_error(tool_args, tool_context)
-            if repeated_read_error:
-                return repeated_read_error
-            missing_protocol_read_error = _missing_protocol_output_read_policy_error(tool_args, tool_context)
-            if missing_protocol_read_error:
-                return missing_protocol_read_error
-            output_plan_error = _workflow_output_plan_policy_error(tool_args, tool_context)
-            if output_plan_error:
-                return output_plan_error
-            protocol_write_error = _workflow_protocol_write_policy_error(tool_args, tool_context)
-            if protocol_write_error:
-                return protocol_write_error
-            producer_write_error = _producer_write_after_success_policy_error(tool_args, tool_context)
-            if producer_write_error:
-                return producer_write_error
-            host_control_error = _sandbox_host_control_exec_policy_error(tool_args)
-            if host_control_error:
-                return host_control_error
-            compound_producer_error = _compound_producer_verification_policy_error(tool_args, tool_context)
-            if compound_producer_error:
-                return compound_producer_error
-            script_execution_error = _workflow_script_execution_policy_error(tool_args, tool_context)
-            if script_execution_error:
-                return script_execution_error
-
-        if tool_name in {"record_crawl_run", "query_jobs"}:
-            active_error = _active_sandbox_record_query_error(tool_context, tool_name)
-            if active_error:
-                return active_error
-            start_error = _workflow_requires_sandbox_start_error(tool_context)
-            if start_error:
-                return start_error
-
-        if tool_name == "promote_sandbox_extraction":
-            start_error = _workflow_requires_sandbox_start_error(tool_context)
-            if start_error:
-                return start_error
-            return None
-
-        if tool_name != "persist_sandbox_job_extraction":
-            return None
-
-        active_error = _active_sandbox_persistence_error(tool_context)
-        if active_error:
-            return active_error
-
-        extraction = tool_args.get("extraction")
-        if not isinstance(extraction, dict):
-            return _persistence_guard_error(
-                "missing extraction payload; pass the finalized sandbox result.result object after sandbox finalization succeeds",
-                (
-                    "Do not call query_jobs or summarize success. Repair the workflow by finalizing the sandbox "
-                    "successfully, then retry persistence with the final result.result payload."
-                ),
-            )
-
-        audit_error = _audit_status_persistence_error(extraction)
-        if audit_error:
-            return audit_error
-
-        payload = _coerce_extraction_payload(extraction)
-        try:
-            validate_job_extraction_payload(payload)
-        except ValueError as exc:
-            return _persistence_guard_error(
-                str(exc),
-                (
-                    "Use this schema error as the next repair target. Correct the sandbox extractor/protocol output "
-                    "or extraction payload, rerun validation/finalization if needed, then retry persistence. Do not "
-                    "query old DB rows as success verification after this failed write."
-                ),
-            )
-        return None
-
-    async def after_tool_callback(
-        self,
-        *,
-        tool: Any,
-        tool_args: dict[str, Any],
-        tool_context: Any,
-        result: dict,
-    ) -> dict | None:
-        tool_name = getattr(tool, "name", "")
-        _record_immediate_tool_error(tool_name, tool_args, tool_context, result)
-        _record_or_reset_repeated_inspection(tool_name, tool_args, tool_context, result)
-        _clear_satisfied_planned_next_tool(tool_name, tool_args, tool_context, result)
-        if tool_name != "update_extraction_context" and _is_extraction_context_progress_action(tool_name, tool_args):
-            _reset_extraction_context_update_guard(tool_context)
-        if tool_name != "run_skill_script" or not _sandbox_read_signature(tool_args):
-            _reset_sandbox_read_guard(tool_context)
-        if tool_name in {"fetch_page_to_workspace", "render_page_to_workspace", "load_test_fixture_page_to_workspace"}:
-            _record_last_page_workspace(tool_context, result)
-            return None
-
-        if tool_name in {"persist_sandbox_job_extraction", "promote_sandbox_extraction"} and isinstance(result, dict) and result.get("status") == "error":
-            return _add_repair_required_next(
-                result,
-                (
-                    f"{tool_name} failed. Read the error, correct the "
-                    "sandbox-produced extraction payload/files, then retry promotion/persistence. Do not call query_jobs or produce "
-                    "a final success summary until a write succeeds or you can state a blocker."
-                ),
-            )
-        if tool_name in {"persist_sandbox_job_extraction", "promote_sandbox_extraction"}:
-            _record_promotion_result(tool_context, result)
-            if tool_name == "promote_sandbox_extraction":
-                return _add_versioned_artifact_handles_to_promotion(tool_context, result)
-            return None
-        if tool_name == "query_jobs":
-            _record_query_jobs_result(tool_context, result)
-            return None
-        if getattr(tool, "name", "") != "run_skill_script" or tool_args.get("skill_name") != "sandbox-page-analyst":
-            return None
-        state = getattr(tool_context, "state", None)
-        if not _is_state_like(state):
-            return None
-
-        payload = _parse_skill_script_stdout(result)
-        file_path = str(tool_args.get("file_path") or "")
-        repeat_guard = _sandbox_repeat_guard_result(state, tool_args, payload)
-        if repeat_guard:
-            active = state.get(ACTIVE_SANDBOX_STATE_KEY)
-            if isinstance(active, dict):
-                if repeat_guard.get("terminal", True):
-                    active["status"] = "guardrail_triggered"
-                    active["guardrail"] = repeat_guard["guardrail"]
-                else:
-                    active["status"] = "running"
-                    active["last_repair_target"] = {
-                        "file_path": file_path,
-                        "artifact_hint": "accountable protocol outputs",
-                        "required_action": "agent_plan_repair",
-                        "error": str(repeat_guard.get("error") or repeat_guard.get("guardrail") or ""),
-                    }
-                state[ACTIVE_SANDBOX_STATE_KEY] = active
-            return repeat_guard
-        if file_path.endswith("sandbox_start.py") and payload.get("status") == "running":
-            mode = str(payload.get("mode") or "workflow")
-            state[ACTIVE_SANDBOX_STATE_KEY] = {
-                "audit_id": str(payload.get("audit_id") or ""),
-                "status": "running",
-                "mode": mode,
-                "command_count": 0,
-                "forced_continuations": 0,
-            }
-            if mode != "workflow":
-                return _add_required_next(
-                    result,
-                    "diagnostic sandbox started; run the requested bounded probe with the appropriate sandbox tool, then answer with bounded stdout/stderr previews",
-                )
-            return _add_required_next(
-                result,
-                "Continue the sandbox workflow by first recording extraction_plan, extraction_strategy, and immediate_goal if they are missing. The immediate_goal must name the current strategy step with evidence, strategy, validation, and next script/probe objective before producer scripting.",
-            )
-
-        active = state.get(ACTIVE_SANDBOX_STATE_KEY)
-        if not isinstance(active, dict):
-            return None
-        if file_path.endswith("sandbox_write_file.py"):
-            _track_pending_sandbox_script_write(state, active, tool_args, payload)
-            repair_next = _sandbox_debugger_required_next(result, active, file_path, payload, tool_args)
-            if repair_next:
-                _record_active_repair_target(state, active, file_path, payload, tool_args)
-                return repair_next
-            return _add_required_next_for_pending_script(result, state)
-        if file_path.endswith("sandbox_apply_patch.py"):
-            _track_pending_sandbox_script_patch(state, active, tool_args, payload)
-            repair_next = _sandbox_debugger_required_next(result, active, file_path, payload, tool_args)
-            if repair_next:
-                _record_active_repair_target(state, active, file_path, payload, tool_args)
-                return repair_next
-            return _add_required_next_for_pending_script(result, state)
-        if file_path.endswith("sandbox_exec.py"):
-            active["command_count"] = int(payload.get("command_index") or active.get("command_count") or 0)
-            status = str(payload.get("status") or "")
-            active["status"] = status if status == "guardrail_triggered" else "running"
-            if status == "success" and _successful_exec_clears_repair_target(active):
-                active.pop("last_repair_target", None)
-            state[ACTIVE_SANDBOX_STATE_KEY] = active
-            _mark_pending_sandbox_script_execution(state, active, tool_args, payload)
-            _mark_successful_producer_rerun_after_repair(state, active, tool_args, payload)
-            return _sandbox_debugger_required_next(result, active, file_path, payload, tool_args)
-        if file_path.endswith("sandbox_finalize.py"):
-            status = str(payload.get("status") or "")
-            if status in {"finalized", "success"}:
-                _record_finalized_sandbox_for_promotion(state, active, payload)
-                _state_pop(state, ACTIVE_SANDBOX_STATE_KEY, None)
-                _state_pop(state, SANDBOX_MODE_RESOURCE_STATE_KEY, None)
-                _state_pop(state, SANDBOX_SITE_RESOURCE_STATE_KEY, None)
-            elif status == "guardrail_triggered":
-                active["status"] = status
-                state[ACTIVE_SANDBOX_STATE_KEY] = active
-                _state_pop(state, SANDBOX_MODE_RESOURCE_STATE_KEY, None)
-                _state_pop(state, SANDBOX_SITE_RESOURCE_STATE_KEY, None)
-            else:
-                # Finalizer errors are protocol repair feedback; the sandbox
-                # container remains running until successful finalization or a
-                # guardrail. Keep forcing the agent back into the repair loop.
-                active["status"] = "running"
-                active["last_repair_target"] = {
-                    "file_path": file_path,
-                    "artifact_hint": "accountable protocol outputs",
-                    "required_action": "agent_plan_repair",
-                    "error": str(payload.get("error") or payload.get("stderr") or "sandbox finalization error"),
-                }
-                state[ACTIVE_SANDBOX_STATE_KEY] = active
-            return _sandbox_debugger_required_next(result, active, file_path, payload, tool_args)
-        if file_path.endswith("validate_outputs.py"):
-            repair_next = _sandbox_debugger_required_next(result, active, file_path, payload, tool_args)
-            if repair_next:
-                _record_active_repair_target(state, active, file_path, payload, tool_args)
-                return repair_next
-            return None
-        return None
-
-    async def before_model_callback(
-        self,
-        *,
-        callback_context: Any,
-        llm_request: LlmRequest,
-    ) -> LlmResponse | None:
-        state = getattr(callback_context, "state", None)
-        _prune_loaded_resource_contexts(llm_request, state)
-        _inject_latest_tool_result(llm_request)
-        _inject_session_extraction_context(llm_request, state)
-        _inject_finalized_sandbox_persistence_guard(llm_request, state)
-        _inject_final_response_contract(llm_request, state)
-        active = _active_sandbox_from_contents(llm_request.contents)
-        if not active:
-            start_guard_text = _workflow_start_guard_text_from_context(callback_context)
-            if start_guard_text:
-                llm_request.contents.append(
-                    genai_types.Content(
-                        role="user",
-                        parts=[genai_types.Part.from_text(text=start_guard_text)],
-                    )
-                )
-            return None
-        if str(active.get("mode") or "workflow") != "workflow":
-            return None
-        state_active = state.get(ACTIVE_SANDBOX_STATE_KEY) if _is_state_like(state) else None
-        if isinstance(state_active, dict) and str(state_active.get("audit_id") or "") == str(active.get("audit_id") or ""):
-            active.update({key: value for key, value in state_active.items() if key in {"last_repair_target", "status", "guardrail"}})
-        audit_id = active["audit_id"]
-        if str(active.get("status") or "") == "guardrail_triggered":
-            guardrail = str(active.get("guardrail") or "sandbox_guardrail_triggered")
-            llm_request.contents.append(
-                genai_types.Content(
-                    role="user",
-                    parts=[
-                        genai_types.Part.from_text(
-                            text=(
-                                "<RUNTIME_SANDBOX_GUARD>\n"
-                                "purpose: stop a terminal workflow sandbox cleanly.\n"
-                                "priority: hard operational constraint.\n"
-                                "usage: produce a compact blocker response; do not call more sandbox, persistence, "
-                                "record, query, or context-update tools for this sandbox.\n"
-                                f"message: sandbox audit {audit_id} is terminal because guardrail {guardrail} was "
-                                "triggered. Report the audit_id, guardrail, and last actionable error/blocker. "
-                                "Do not claim finalized artifacts, saved jobs, or persistence success.\n"
-                                "</RUNTIME_SANDBOX_GUARD>"
-                            )
-                        )
-                    ],
-                )
-            )
-            return None
-        command_count = int(active.get("command_count") or 0)
-        pending_script = _pending_scripts_for_active_sandbox(state, active) if _is_state_like(state) else {}
-        session_context = state.get(SESSION_EXTRACTION_CONTEXT_STATE_KEY) if _is_state_like(state) else None
-        immediate_goal_error = _immediate_goal_validation_error(session_context) if isinstance(session_context, dict) else None
-        if pending_script:
-            next_action = (
-                f"A workflow helper/script was written but has not been verified. Run the relevant focused command "
-                f"for `{pending_script.get('path') or 'output/extractor.py'}` with sandbox_exec.py, then verify the "
-                "required protocol artifacts exist before validate/finalize/persist/query."
-            )
-        elif isinstance(active.get("last_repair_target"), dict):
-            repair = active["last_repair_target"]
-            next_action = _repair_target_next_action(repair)
-        elif immediate_goal_error:
-            next_action = (
-                "Before running sandbox probes as validation or writing/running producer scripts, call "
-                "update_extraction_context with extraction_plan, extraction_strategy, and immediate_goal. "
-                "The immediate_goal must name the current strategy step with evidence, strategy, validation, "
-                "and next script/probe objective. For the first ITviec fixture goal, establish the repeated "
-                "job-card unit boundary and the smallest validation probe for that boundary."
-            )
-        elif command_count >= 5:
-            next_action = (
-                "You likely have enough page inspection evidence. Continue the sandbox workflow by choosing the "
-                "appropriate loaded sandbox tool: load bounded evidence or script output, write or repair accountable "
-                "protocol files or supporting scripts, validate, and finalize only if validation has passed."
-            )
-        else:
-            next_action = (
-                "Continue the sandbox workflow by choosing the appropriate loaded sandbox tool to inspect the "
-                "mounted page, derive repeated patterns, or write evidence/serialization helpers; do not answer "
-                "the user yet."
-            )
-        llm_request.contents.append(
-            genai_types.Content(
-                role="user",
-                parts=[
-                    genai_types.Part.from_text(
-                        text=(
-                            "<RUNTIME_SANDBOX_GUARD>\n"
-                            "purpose: keep an active workflow sandbox on the required extraction path.\n"
-                            "priority: hard operational constraint.\n"
-                            "usage: obey this while the sandbox is running; use session context for next-step reasoning.\n"
-                            f"message: sandbox audit {audit_id} is running and has not finalized. {next_action} "
-                            "Do not produce a final text response while required protocol outputs are missing. "
-                            "If the sandbox has guardrail_triggered, do not persist; report the guardrail blocker. "
-                            "Do not use inspection commands for inline heredocs or shell snippets that write files; "
-                            "write helper/protocol files through the sandbox file-writing capability so they are "
-                            "audited and validated. "
-                            "Do not import bs4/lxml/parsel unless already verified installed in the sandbox.\n"
-                            "</RUNTIME_SANDBOX_GUARD>"
-                        )
-                    )
-                ],
-            )
-        )
-        return None
-
-    async def after_model_callback(
-        self,
-        *,
-        callback_context: Any,
-        llm_response: LlmResponse,
-    ) -> LlmResponse | None:
-        state = getattr(callback_context, "state", None)
-        if not _is_state_like(state):
-            return None
-        planned_replacement = _planned_next_tool_model_replacement(state, llm_response)
-        if planned_replacement:
-            return planned_replacement
-        repair_replacement = _active_repair_target_model_replacement(state, llm_response)
-        if repair_replacement:
-            return repair_replacement
-        active_replacement = _active_sandbox_model_replacement(state, llm_response)
-        if active_replacement:
-            return active_replacement
-        return None
-
-
-class SandboxOutputGatePlugin(BasePlugin):
-    """Persist oversized sandbox-like tool results before they enter context."""
-
-    def __init__(
-        self,
-        *,
-        direct_max_chars: int = 8_000,
-        preview_max_chars: int = 2_000,
-        name: str = "sandbox_output_gate_plugin",
-    ) -> None:
-        super().__init__(name=name)
-        self.direct_max_chars = direct_max_chars
-        self.preview_max_chars = preview_max_chars
-
-    async def after_tool_callback(
-        self,
-        *,
-        tool: Any,
-        tool_args: dict[str, Any],
-        tool_context: Any,
-        result: dict,
-    ) -> dict | None:
-        if not isinstance(result, dict):
-            return None
-        if not self._should_gate(tool, tool_args, result):
-            return None
-
-        artifact_handles = await _persist_artifact_sources(result, tool_context)
-        if artifact_handles:
-            result = dict(result)
-            existing_artifacts = result.get("artifact_handles") if isinstance(result.get("artifact_handles"), dict) else {}
-            result["artifact_handles"] = {**existing_artifacts, **artifact_handles}
-            result.pop("artifact_sources", None)
-            _record_sandbox_artifact_handles(tool_context, result, artifact_handles)
-
-        if getattr(tool, "name", "") == "run_skill_script" and tool_args.get("skill_name") == "sandbox-page-analyst":
-            return result if artifact_handles else None
-
-        serialized = json.dumps(result, ensure_ascii=True, sort_keys=True, default=str)
-        if len(serialized) <= self.direct_max_chars:
-            return result if artifact_handles else None
-
-        audit_id = str(result.get("audit_id") or _extract_audit_id(result) or "sandbox_run_unknown")
-        digest = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
-        artifact_name = f"{audit_id}__oversized__tool_output_{digest[:12]}.json"
-        part = genai_types.Part.from_bytes(data=serialized.encode("utf-8"), mime_type="application/json")
-        version = await tool_context.save_artifact(
-            artifact_name,
-            part,
-            custom_metadata={"sha256": digest, "original_bytes": len(serialized.encode("utf-8"))},
-        )
-        stored_response: dict[str, Any] = {
-            "status": "stored_preview",
-            "reason": "tool_output_exceeded_context_threshold",
-            "audit_id": audit_id,
-            "original_bytes": len(serialized.encode("utf-8")),
-            "sha256": digest,
-            "preview": _preview(serialized, self.preview_max_chars),
-            "artifact": {
-                "artifact_name": artifact_name,
-                "version": version,
-                "mime_type": "application/json",
-                "bytes": len(serialized.encode("utf-8")),
-                "sha256": digest,
-            },
-        }
-        paths = _compact_output_paths(result)
-        if paths:
-            stored_response["paths"] = paths
-        for key in (
-            "message",
-            "observation",
-            "error_type",
-            "path",
-            "model",
-            "written",
-            "errors",
-            "artifacts",
-            "stdout_bytes",
-            "stderr_bytes",
-            "stdout_truncated",
-            "stderr_truncated",
-            "returned_stdout_chars",
-            "returned_stderr_chars",
-            "exit_code",
-            "command_index",
-            "guardrail",
-            "error",
-        ):
-            if key in result:
-                stored_response[key] = result[key]
-        return stored_response
-
-    def _should_gate(self, tool: Any, tool_args: dict[str, Any], result: dict[str, Any]) -> bool:
-        tool_name = getattr(tool, "name", "")
-        if tool_name in {
-            "run_skill_script",
-            "fetch_page",
-            "render_page",
-            "fetch_page_to_workspace",
-            "render_page_to_workspace",
-            "load_test_fixture_page_to_workspace",
-        }:
-            return True
-        if tool_args.get("skill_name") == "sandbox-page-analyst":
-            return True
-        return any(key in result for key in ("stdout", "stderr", "content", "html", "stdout_preview", "stderr_preview"))
-
-
-class SandboxNoteRefinementPlugin(BasePlugin):
-    """Periodically summarize workflow tool events and inject notes into model requests."""
-
-    def __init__(
-        self,
-        *,
-        command_interval: int = 5,
-        max_notes: int = 5,
-        prune_completed_sandbox_context: bool = True,
-        model: str = DEFAULT_NOTE_REFINEMENT_MODEL,
-        summarizer: Any = None,
-        name: str = "sandbox_note_refinement_plugin",
-    ) -> None:
-        super().__init__(name=name)
-        self.command_interval = max(1, min(command_interval, 5))
-        self.max_notes = max(1, max_notes)
-        self.prune_completed_sandbox_context = prune_completed_sandbox_context
-        self.model = model
-        self.summarizer = summarizer
-
-    async def after_tool_callback(
-        self,
-        *,
-        tool: Any,
-        tool_args: dict[str, Any],
-        tool_context: Any,
-        result: dict,
-    ) -> dict | None:
-        state = getattr(tool_context, "state", None)
-        if not _is_state_like(state):
-            return None
-
-        event = _workflow_tool_event_note_source(tool, tool_args, result, state)
-        if not event:
-            return None
-        audit_id = str(event.get("note_group") or event.get("audit_id") or WORKFLOW_EVENT_GROUP)
-        event_index = int(event.get("event_index") or 0)
-        command_index = int(event.get("command_index") or 0)
-
-        buffers = state.setdefault(SANDBOX_NOTE_BUFFER_STATE_KEY, {})
-        if not isinstance(buffers, dict):
-            buffers = {}
-            state[SANDBOX_NOTE_BUFFER_STATE_KEY] = buffers
-        buffer = buffers.setdefault(audit_id, [])
-        if not isinstance(buffer, list):
-            buffer = []
-            buffers[audit_id] = buffer
-        buffer.append(event)
-
-        # Keep the newest event response full. When event N+1 arrives,
-        # summarize the previous N responses and leave event N+1 unsummarized.
-        if len(buffer) <= self.command_interval:
-            return None
-
-        ordered_buffer = sorted(buffer, key=_workflow_event_sort_key)
-        events_to_summarize = list(ordered_buffer[: self.command_interval])
-        remaining_events = list(ordered_buffer[self.command_interval :])
-        buffers[audit_id] = remaining_events
-        kept_full_event_index = int(
-            (remaining_events[-1] if remaining_events else events_to_summarize[-1]).get("event_index")
-            or event_index
-        )
-        kept_full_command_index = int(
-            (remaining_events[-1] if remaining_events else events_to_summarize[-1]).get("command_index")
-            or command_index
-        )
-        try:
-            current_notes = state.get(SANDBOX_NOTES_STATE_KEY)
-            visible_notes = current_notes[-self.max_notes :] if isinstance(current_notes, list) else []
-            summary = await self._summarize(audit_id, events_to_summarize, visible_notes)
-        except Exception as exc:  # Do not fail the user workflow because note refinement failed.
-            errors = state.setdefault(SANDBOX_NOTE_ERROR_STATE_KEY, [])
-            if isinstance(errors, list):
-                errors.append({"audit_id": audit_id, "event_index": event_index, "command_index": command_index, "error": str(exc)})
-            return None
-
-        notes = state.setdefault(SANDBOX_NOTES_STATE_KEY, [])
-        if not isinstance(notes, list):
-            notes = []
-            state[SANDBOX_NOTES_STATE_KEY] = notes
-        notes.append(
-            {
-                "audit_id": audit_id,
-                "through_event_index": int(events_to_summarize[-1].get("event_index") or event_index),
-                "kept_full_event_index": kept_full_event_index,
-                "through_command_index": int(events_to_summarize[-1].get("command_index") or command_index),
-                "kept_full_command_index": kept_full_command_index,
-                "event_count": len(events_to_summarize),
-                "summary": summary,
-            }
-        )
-        del notes[:-self.max_notes]
-        _mark_summarized_workflow_events(state, events_to_summarize)
-        _mark_summarized_commands(state, audit_id, events_to_summarize)
-        return None
-
-    async def before_model_callback(
-        self,
-        *,
-        callback_context: Any,
-        llm_request: LlmRequest,
-    ) -> LlmResponse | None:
-        state = getattr(callback_context, "state", None)
-        if not _is_state_like(state):
-            state = {}
-
-        notes = state.get(SANDBOX_NOTES_STATE_KEY)
-        visible_notes = notes[-self.max_notes :] if isinstance(notes, list) else []
-
-        if self.prune_completed_sandbox_context:
-            _prune_summarized_workflow_events(llm_request, visible_notes, state)
-            _prune_summarized_sandbox_contexts(llm_request, visible_notes, state)
-            _prune_completed_sandbox_contexts(llm_request, visible_notes)
-
-        if visible_notes:
-            llm_request.contents.append(
-                genai_types.Content(
-                    role="user",
-                    parts=[
-                        genai_types.Part.from_text(
-                            text=(
-                                "<RUNTIME_SANDBOX_NOTES>\n"
-                                "purpose: supporting evidence from compacted ADK workflow/tool history.\n"
-                                "priority: evidence only, not workflow authority.\n"
-                                "usage: use these notes to recover prior facts and compare against current results. "
-                                "If they conflict with SESSION_EXTRACTION_CONTEXT, verify with exact tool output when "
-                                "possible, then update SESSION_EXTRACTION_CONTEXT. Keep using full available tool "
-                                "responses for exact facts.\n"
-                                "notes_json:\n"
-                                + json.dumps(visible_notes, ensure_ascii=True, sort_keys=True)
-                                + "\n</RUNTIME_SANDBOX_NOTES>"
-                            )
-                        )
-                    ],
-                )
-            )
-        return None
-
-    async def _summarize(
-        self,
-        audit_id: str,
-        events: list[dict[str, Any]],
-        current_notes: list[Any],
-    ) -> str:
-        if self.summarizer is not None:
-            try:
-                maybe = self.summarizer(audit_id, current_notes, events)
-            except TypeError:
-                maybe = self.summarizer(audit_id, events)
-            if inspect.isawaitable(maybe):
-                return str(await maybe)
-            return str(maybe)
-
-        from litellm import acompletion
-
-        prompt = (
-            "Summarize these ADK workflow tool results for a job-page extraction agent. "
-            "Fuse the current notes with the tool results, and return one concise updated note. "
-            "The note must be under 200 words. "
-            "Focus on: observations, extraction_plan implications, "
-            "result-vs-requirement comparison, errors, artifact paths, and next repair facts. "
-            "Do not invent page facts. Do not include raw HTML or long stdout.\n\n"
-            f"audit_id: {audit_id}\n"
-            f"current_notes_json: {_preview(json.dumps(current_notes, ensure_ascii=True, sort_keys=True, default=str), 6_000)}\n"
-            f"events_json: {_preview(json.dumps(events, ensure_ascii=True, sort_keys=True, default=str), 12_000)}"
-        )
-        response = await acompletion(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": "You write compact continuity notes for an autonomous scraping workflow."},
-                {"role": "user", "content": prompt},
-            ],
-            temperature=0,
-            max_tokens=500,
-        )
-        return str(response.choices[0].message.content or "").strip()
-
-
-def _is_transient_model_error(error: Exception) -> bool:
-    error_text = f"{type(error).__name__}: {error}".lower()
-    transient_markers = (
-        "rate limit",
-        "rate_limit",
-        "ratelimit",
-        "tokens per min",
-        "token per min",
-        "tpm",
-        "too many requests",
-        "429",
-        "timeout",
-        "timed out",
-        "temporarily unavailable",
-        "service unavailable",
-        "overloaded",
-        "connection",
-        "server error",
-        "internal server error",
-        "500",
-        "502",
-        "503",
-        "504",
-    )
-    if any(marker in error_text for marker in transient_markers):
-        return True
-
-    transient_class_markers = (
-        "ratelimit",
-        "timeout",
-        "apiconnection",
-        "internalserver",
-        "serviceunavailable",
-        "apistatus",
-    )
-    class_name = type(error).__name__.lower()
-    return any(marker in class_name for marker in transient_class_markers)
-
-
-def _retry_delay_from_error(error: Exception) -> float | None:
-    error_text = str(error)
-    patterns = (
-        r"try again in\s+([0-9]+(?:\.[0-9]+)?)\s*(ms|milliseconds?|s|sec|seconds?|m|minutes?)",
-        r"retry[- ]after[:=]?\s+([0-9]+(?:\.[0-9]+)?)\s*(ms|milliseconds?|s|sec|seconds?|m|minutes?)?",
-    )
-    for pattern in patterns:
-        match = re.search(pattern, error_text, flags=re.IGNORECASE)
-        if not match:
-            continue
-        value = float(match.group(1))
-        unit = (match.group(2) or "s").lower()
-        if unit.startswith("ms") or unit.startswith("millisecond"):
-            return value / 1000
-        if unit.startswith("m") and not unit.startswith("ms"):
-            return value * 60
-        return value
-    retry_after = getattr(error, "retry_after", None)
-    if isinstance(retry_after, int | float):
-        return float(retry_after)
-    response = getattr(error, "response", None)
-    headers = getattr(response, "headers", None)
-    if headers is not None:
-        try:
-            value = headers.get("retry-after")
-        except AttributeError:
-            value = None
-        if value:
-            try:
-                return float(value)
-            except ValueError:
-                return None
-    return None
-
-
-def _model_retry_exhausted_response(error: Exception, *, attempts: int, detail: str) -> LlmResponse:
-    return LlmResponse(
-        error_code="MODEL_RETRY_EXHAUSTED",
-        error_message=(
-            f"{detail} retry_attempts={attempts}; last_error_type={type(error).__name__}; "
-            f"last_error={_preview(str(error), 500)}"
-        ),
-    )
 
 
 def _preview(text: str, max_chars: int) -> str:
@@ -3432,23 +2585,7 @@ def _is_extraction_context_progress_action(tool_name: str, tool_args: dict[str, 
 def _extraction_context_update_digest(tool_args: dict[str, Any]) -> str:
     material = {
         key: tool_args.get(key)
-        for key in (
-            "audit_id",
-            "page_id",
-            "status",
-            "task_understanding",
-            "final_goal",
-            "initial_plan",
-            "observations",
-            "extraction_plan",
-            "last_result",
-            "known_errors",
-            "attempted_actions",
-            "immediate_goal",
-            "required_outputs",
-            "workflow_contract",
-            "expected_output",
-        )
+        for key in EXTRACTION_CONTEXT_DIGEST_KEYS
     }
     return _sha256_json(material)
 
@@ -4242,96 +3379,6 @@ def _llm_response_text(llm_response: LlmResponse) -> str:
     return "\n".join(chunks)
 
 
-def _model_reasoning_telemetry(
-    llm_response: LlmResponse,
-    *,
-    reasoning_effort: str,
-    preview_max_chars: int,
-) -> dict[str, Any] | None:
-    thought_parts = _llm_response_thought_texts(llm_response)
-    usage = getattr(llm_response, "usage_metadata", None)
-    thoughts_token_count = getattr(usage, "thoughts_token_count", None) if usage is not None else None
-    if not thought_parts and not thoughts_token_count and not reasoning_effort:
-        return None
-
-    telemetry: dict[str, Any] = {
-        "model_version": str(getattr(llm_response, "model_version", "") or ""),
-        "reasoning_effort": reasoning_effort,
-        "thought_part_count": len(thought_parts),
-    }
-    if thought_parts and preview_max_chars:
-        telemetry["reasoning_summary_preview"] = "\n".join(thought_parts)[:preview_max_chars]
-    if thoughts_token_count:
-        telemetry["thoughts_token_count"] = thoughts_token_count
-    return telemetry
-
-
-def _attach_reasoning_telemetry_to_model_event(
-    llm_response: LlmResponse,
-    telemetry: dict[str, Any],
-) -> None:
-    metadata = dict(llm_response.custom_metadata or {})
-    event_payload = dict(telemetry)
-    event_payload["adk_web_surface"] = "model_event_custom_metadata"
-    metadata["job_scraper_reasoning"] = event_payload
-    llm_response.custom_metadata = metadata
-
-
-def _surface_reasoning_telemetry_as_adk_web_thought(
-    llm_response: LlmResponse,
-    telemetry: dict[str, Any],
-) -> bool:
-    if _llm_response_thought_texts(llm_response):
-        return False
-
-    display_text = _reasoning_telemetry_display_text(telemetry)
-    if not display_text:
-        return False
-    if not str(telemetry.get("reasoning_summary_preview") or "").strip():
-        return False
-
-    if llm_response.content is None:
-        llm_response.content = genai_types.Content(role="model", parts=[])
-    if llm_response.content.parts is None:
-        llm_response.content.parts = []
-
-    llm_response.content.parts.insert(0, genai_types.Part(text=display_text, thought=True))
-    metadata = dict(llm_response.custom_metadata or {})
-    event_payload = dict(metadata.get("job_scraper_reasoning") or telemetry)
-    event_payload["adk_web_thought_part"] = "synthetic_reasoning_telemetry"
-    metadata["job_scraper_reasoning"] = event_payload
-    llm_response.custom_metadata = metadata
-    return True
-
-
-def _reasoning_telemetry_display_text(telemetry: dict[str, Any]) -> str:
-    preview = str(telemetry.get("reasoning_summary_preview") or "").strip()
-    if preview:
-        return preview
-
-    fields: list[str] = []
-    effort = str(telemetry.get("reasoning_effort") or "").strip()
-    if effort:
-        fields.append(f"effort={effort}")
-    token_count = telemetry.get("thoughts_token_count")
-    if token_count:
-        fields.append(f"thoughts_token_count={token_count}")
-    if not fields:
-        return ""
-    return "OpenAI reasoning telemetry: " + "; ".join(fields) + "."
-
-
-def _llm_response_thought_texts(llm_response: LlmResponse) -> list[str]:
-    content = getattr(llm_response, "content", None)
-    if not content:
-        return []
-    texts: list[str] = []
-    for part in content.parts or []:
-        if getattr(part, "thought", False) and getattr(part, "text", None):
-            texts.append(str(part.text))
-    return texts
-
-
 def _record_last_page_workspace(tool_context: Any, result: dict[str, Any]) -> None:
     if not isinstance(result, dict) or result.get("status") != "success":
         return
@@ -4430,68 +3477,6 @@ def _record_query_jobs_result(tool_context: Any, result: dict[str, Any]) -> None
     pending["query_status"] = "success"
     pending["queried_count"] = int(result.get("count") or 0)
     state[FINALIZED_SANDBOX_PROMOTION_STATE_KEY] = pending
-
-
-def _record_sandbox_artifact_handles(
-    tool_context: Any,
-    result: dict[str, Any],
-    artifact_handles: dict[str, dict[str, Any]],
-) -> None:
-    state = getattr(tool_context, "state", None)
-    if not _is_state_like(state) or not artifact_handles:
-        return
-    payload = _parse_skill_script_stdout(result)
-    audit_id = str(result.get("audit_id") or payload.get("audit_id") or _extract_audit_id(result) or "")
-    if not audit_id:
-        return
-    by_audit = state.setdefault(SANDBOX_ARTIFACT_HANDLES_STATE_KEY, {})
-    if not isinstance(by_audit, dict):
-        by_audit = {}
-        state[SANDBOX_ARTIFACT_HANDLES_STATE_KEY] = by_audit
-    existing = by_audit.get(audit_id)
-    merged = dict(existing) if isinstance(existing, dict) else {}
-    merged.update(artifact_handles)
-    by_audit[audit_id] = merged
-    state[SANDBOX_ARTIFACT_HANDLES_STATE_KEY] = by_audit
-
-    pending = state.get(FINALIZED_SANDBOX_PROMOTION_STATE_KEY)
-    if isinstance(pending, dict) and str(pending.get("audit_id") or "") == audit_id:
-        pending["artifact_handles"] = merged
-        state[FINALIZED_SANDBOX_PROMOTION_STATE_KEY] = pending
-
-
-def _versioned_artifact_handles_for_audit(state: Any, audit_id: str) -> dict[str, dict[str, Any]]:
-    if not _is_state_like(state) or not audit_id:
-        return {}
-    by_audit = state.get(SANDBOX_ARTIFACT_HANDLES_STATE_KEY)
-    if not isinstance(by_audit, dict):
-        return {}
-    handles = by_audit.get(audit_id)
-    return dict(handles) if isinstance(handles, dict) else {}
-
-
-def _add_versioned_artifact_handles_to_promotion(tool_context: Any, result: dict[str, Any]) -> dict[str, Any] | None:
-    if not isinstance(result, dict) or result.get("status") != "success":
-        return None
-    state = getattr(tool_context, "state", None)
-    if not _is_state_like(state):
-        return None
-    audit_id = str(result.get("audit_id") or "")
-    handles = _versioned_artifact_handles_for_audit(state, audit_id)
-    if not handles:
-        pending = state.get(FINALIZED_SANDBOX_PROMOTION_STATE_KEY)
-        if isinstance(pending, dict) and str(pending.get("audit_id") or "") == audit_id:
-            pending_handles = pending.get("artifact_handles")
-            handles = dict(pending_handles) if isinstance(pending_handles, dict) else {}
-    if not handles:
-        return None
-    updated = dict(result)
-    updated["adk_artifact_handles"] = handles
-    updated["artifact_version_policy"] = (
-        "Use adk_artifact_handles for final reporting and audit references. Each handle includes a stable "
-        "ADK artifact_name plus version; workspace paths are not versioned artifact references."
-    )
-    return updated
 
 
 def _proposal_paths_from_finalize_payload(payload: dict[str, Any]) -> list[dict[str, str]]:
@@ -4725,7 +3710,11 @@ def _latest_tool_result_from_contents(contents: list[genai_types.Content]) -> di
             continue
         if len(responses) == 1:
             return responses[0]
-        return {"tool_results": responses, "count": len(responses), "compacted": True}
+        return {
+            RuntimePayloadKey.TOOL_RESULTS.value: responses,
+            RuntimePayloadKey.COUNT.value: len(responses),
+            RuntimePayloadKey.COMPACTED.value: True,
+        }
     return None
 
 
@@ -4736,7 +3725,7 @@ def _skip_latest_tool_result(tool_name: str, payload: Any) -> bool:
 def _is_successful_context_update(tool_name: str, payload: Any) -> bool:
     if tool_name != "update_extraction_context" or not isinstance(payload, dict):
         return False
-    return str(payload.get("status") or "").lower() == "success"
+    return str(payload.get(RuntimePayloadKey.STATUS) or "").lower() == RuntimeStatus.SUCCESS
 
 
 def _prune_loaded_resource_contexts(llm_request: LlmRequest, state: Any) -> None:
@@ -4785,9 +3774,9 @@ def _prune_loaded_resource_contexts(llm_request: LlmRequest, state: Any) -> None
 
 
 def _is_compacted_resource_payload(payload: dict[str, Any]) -> bool:
-    return str(payload.get("status") or "") in {
-        "resource_context_removed_after_state_update",
-        "resource_context_compacted_keep_latest_only",
+    return str(payload.get(RuntimePayloadKey.STATUS) or "") in {
+        RuntimeStatus.RESOURCE_CONTEXT_REMOVED_AFTER_STATE_UPDATE,
+        RuntimeStatus.RESOURCE_CONTEXT_COMPACTED_KEEP_LATEST_ONLY,
     }
 
 
@@ -4798,98 +3787,77 @@ def _loaded_resource_placeholder(
     compacted_after_context_update: bool,
 ) -> dict[str, Any]:
     status = (
-        "resource_context_removed_after_state_update"
+        RuntimeStatus.RESOURCE_CONTEXT_REMOVED_AFTER_STATE_UPDATE.value
         if compacted_after_context_update
-        else "resource_context_compacted_keep_latest_only"
+        else RuntimeStatus.RESOURCE_CONTEXT_COMPACTED_KEEP_LATEST_ONLY.value
     )
     placeholder: dict[str, Any] = {
-        "status": status,
-        "tool_name": tool_name,
-        "reason": (
+        RuntimePayloadKey.STATUS.value: status,
+        RuntimePayloadKey.TOOL_NAME.value: tool_name,
+        RuntimePayloadKey.REASON.value: (
             "Full skill/reference text was intentionally removed from this model request after the agent had a "
             "chance to distill it into SESSION_EXTRACTION_CONTEXT."
             if compacted_after_context_update
             else "Older loaded skill/reference text was removed so only the newest full resource remains in context."
         ),
-        "required_next": (
+        RuntimePayloadKey.REQUIRED_NEXT.value: (
             "Reason from SESSION_EXTRACTION_CONTEXT and the current plan. If the discarded resource is needed for "
             "a specific uncertainty, reload that skill/resource, update_extraction_context with the distilled "
             "observations and plan changes, then continue."
         ),
-        "resource_discarded_from_context": True,
+        RuntimePayloadKey.RESOURCE_DISCARDED_FROM_CONTEXT.value: True,
     }
-    for key in (
-        "skill_name",
-        "resource_path",
-        "path",
-        "file_path",
-        "name",
-        "title",
-        "description",
-        "mime_type",
-        "error",
-        "error_type",
-    ):
+    for key in RESOURCE_PLACEHOLDER_KEYS:
         if key in payload:
             placeholder[key] = _compact_latest_value(payload[key], 500)
-    if "status" in payload:
-        placeholder["original_status"] = _compact_latest_value(payload["status"], 120)
-    content_value = payload.get("content") or payload.get("text") or payload.get("instructions")
+    if RuntimePayloadKey.STATUS in payload:
+        placeholder[RuntimePayloadKey.ORIGINAL_STATUS.value] = _compact_latest_value(
+            payload[RuntimePayloadKey.STATUS],
+            120,
+        )
+    content_value = next((payload[key] for key in RESOURCE_TEXT_PAYLOAD_KEYS if payload.get(key)), None)
     if content_value is not None:
         content_text = str(content_value)
-        placeholder["original_chars"] = len(content_text)
-        placeholder["content_preview"] = _preview(content_text, 500)
-        placeholder["sha256"] = hashlib.sha256(content_text.encode("utf-8")).hexdigest()
+        placeholder[RuntimePayloadKey.ORIGINAL_CHARS.value] = len(content_text)
+        placeholder[RuntimePayloadKey.CONTENT_PREVIEW.value] = _preview(content_text, 500)
+        placeholder[RuntimePayloadKey.SHA256.value] = hashlib.sha256(content_text.encode("utf-8")).hexdigest()
     return placeholder
 
 
 def _compact_latest_function_response(tool_name: str, payload: Any) -> dict[str, Any]:
-    if isinstance(payload, dict) and tool_name == "run_skill_script":
+    if isinstance(payload, dict) and tool_name == ToolName.RUN_SKILL_SCRIPT:
         compact = _compact_run_skill_script_result(payload, payload, 1_000)
     elif isinstance(payload, dict):
         compact = _compact_latest_payload(payload, 1_000)
     else:
-        compact = {"value": _preview(str(payload), 1_000), "compacted": True}
-    compact["tool_name"] = tool_name
+        compact = {
+            RuntimePayloadKey.VALUE.value: _preview(str(payload), 1_000),
+            RuntimePayloadKey.COMPACTED.value: True,
+        }
+    compact[RuntimePayloadKey.TOOL_NAME.value] = tool_name
     return compact
 
 
 def _compact_latest_payload(payload: dict[str, Any], preview_max_chars: int) -> dict[str, Any]:
     compact: dict[str, Any] = {}
-    for key in (
-        "status",
-        "error_type",
-        "error",
-        "message",
-        "required_next",
-        "audit_id",
-        "skill_name",
-        "file_path",
-        "exit_code",
-        "command_index",
-        "validated_count",
-        "written_count",
-        "job_count",
-        "expected_count",
-        "actual_count",
-        "missing_required_outputs",
-        "stdout_truncated",
-        "stderr_truncated",
-    ):
+    for key in LATEST_PAYLOAD_KEYS:
         if key in payload:
             compact[key] = _compact_latest_value(payload[key], preview_max_chars)
-    for key in ("stdout", "stdout_preview", "stderr", "stderr_preview"):
+    for key in SANDBOX_TEXT_PREVIEW_KEYS:
         if key in payload:
             compact[key] = _preview(str(payload[key]), preview_max_chars)
     paths = _compact_output_paths(payload)
     if paths:
-        compact["paths"] = paths
+        compact[RuntimePayloadKey.PATHS.value] = paths
     artifact_handles = _compact_artifact_handles(payload)
     if artifact_handles:
-        compact["artifact_handles"] = artifact_handles
+        compact[RuntimePayloadKey.ARTIFACT_HANDLES.value] = artifact_handles
     if not compact:
-        compact["response_preview"] = _preview(json.dumps(payload, ensure_ascii=True, default=str), preview_max_chars)
-    compact["compacted"] = True
+        compact[RuntimePayloadKey.RESPONSE_PREVIEW.value] = _preview(
+            json.dumps(payload, ensure_ascii=True, default=str),
+            preview_max_chars,
+        )
+    compact[RuntimePayloadKey.COMPACTED.value] = True
     return compact
 
 
@@ -5012,42 +3980,17 @@ def _inject_session_extraction_context(llm_request: LlmRequest, state: Any) -> N
 
 
 def _compact_session_context(context: dict[str, Any]) -> dict[str, Any]:
-    if "immediate_goal" not in context and context.get("next_focus"):
-        context = {**context, "immediate_goal": context.get("next_focus")}
-    include_initial_plan = not bool(context.get("extraction_plan"))
-    allowed_keys = (
-        "audit_id",
-        "page_id",
-        "status",
-        "task_understanding",
-        "final_goal",
-        "initial_plan",
-        "observations",
-        "extraction_plan",
-        "extraction_strategy",
-        "last_result",
-        "known_errors",
-        "attempted_actions",
-        "immediate_goal",
-        "planned_next_tool",
-        "repair_scope",
-        "required_outputs",
-        "workflow_contract",
-        "expected_output",
-        "output_contract",
-        "producer_output_plan",
-        "script_manifest_plan",
-        "validation_plan",
-        "workflow_reflections",
-    )
+    if SessionContextKey.IMMEDIATE_GOAL not in context and context.get("next_focus"):
+        context = {**context, SessionContextKey.IMMEDIATE_GOAL.value: context.get("next_focus")}
+    include_initial_plan = not bool(context.get(SessionContextKey.EXTRACTION_PLAN))
     compact: dict[str, Any] = {}
-    for key in allowed_keys:
-        if key == "initial_plan" and not include_initial_plan:
+    for key in SESSION_CONTEXT_COMPACT_KEYS:
+        if key == SessionContextKey.INITIAL_PLAN and not include_initial_plan:
             continue
         if key not in context:
             continue
         value = context[key]
-        if key == "workflow_reflections" and isinstance(value, list):
+        if key == SessionContextKey.WORKFLOW_REFLECTIONS and isinstance(value, list):
             compact[key] = [item for item in value[-6:] if isinstance(item, dict)]
         elif isinstance(value, list):
             compact[key] = [_preview(str(item), 500) for item in value[-8:]]
@@ -5093,660 +4036,6 @@ def _sha256_json(value: Any) -> str:
     return hashlib.sha256(json.dumps(value, ensure_ascii=True, sort_keys=True, default=str).encode("utf-8")).hexdigest()
 
 
-async def _persist_artifact_sources(result: dict[str, Any], tool_context: Any) -> dict[str, dict[str, Any]]:
-    sources = _collect_artifact_sources(result)
-    if not isinstance(sources, list):
-        return {}
-
-    handles: dict[str, dict[str, Any]] = {}
-    for index, source in enumerate(sources):
-        if not isinstance(source, dict):
-            continue
-        source_path = Path(str(source.get("source_path") or ""))
-        artifact_name = _safe_adk_artifact_name(str(source.get("artifact_name") or ""))
-        if not source_path.exists() or not artifact_name:
-            continue
-        data = source_path.read_bytes()
-        digest = hashlib.sha256(data).hexdigest()
-        mime_type = str(source.get("mime_type") or "application/octet-stream")
-        version = await tool_context.save_artifact(
-            artifact_name,
-            genai_types.Part.from_bytes(data=data, mime_type=mime_type),
-            custom_metadata={
-                "sha256": digest,
-                "source_kind": "sandbox_artifact_source",
-                "bytes": len(data),
-            },
-        )
-        key = str(source.get("key") or source_path.stem or f"artifact_{index}")
-        handles[key] = {
-            "artifact_name": artifact_name,
-            "version": version,
-            "mime_type": mime_type,
-            "bytes": len(data),
-            "sha256": digest,
-        }
-    return handles
-
-
-def _collect_artifact_sources(result: dict[str, Any]) -> list[dict[str, Any]]:
-    sources: list[dict[str, Any]] = []
-    seen: set[tuple[str, str]] = set()
-
-    for payload in (result, _parse_skill_script_stdout(result)):
-        if not isinstance(payload, dict):
-            continue
-        payload_sources = payload.get("artifact_sources")
-        if not isinstance(payload_sources, list):
-            continue
-        for source in payload_sources:
-            if not isinstance(source, dict):
-                continue
-            source_path = str(source.get("source_path") or "")
-            artifact_name = str(source.get("artifact_name") or "")
-            fingerprint = (source_path, artifact_name)
-            if fingerprint in seen:
-                continue
-            seen.add(fingerprint)
-            sources.append(source)
-    return sources
-
-
-def _safe_adk_artifact_name(artifact_name: str) -> str:
-    """Keep ADK artifact handles fetchable in ADK Web path-based routes."""
-    return artifact_name.replace("\\", "__").replace("/", "__")
-
-
-def _looks_like_sandbox_payload(payload: dict[str, Any]) -> bool:
-    if str(payload.get("skill_name") or "") == "sandbox-page-analyst":
-        return True
-    if "audit_id" in payload:
-        return True
-    return any(key in payload for key in ("stdout", "stderr", "stdout_preview", "stderr_preview"))
-
-
-def _workflow_tool_event_note_source(
-    tool: Any,
-    tool_args: dict[str, Any],
-    result: dict[str, Any],
-    state: Any,
-) -> dict[str, Any] | None:
-    if not isinstance(result, dict):
-        return None
-    tool_name = str(getattr(tool, "name", "") or "")
-    if not _is_workflow_note_tool(tool_name, tool_args, result):
-        return None
-
-    sequence = int(state.get(WORKFLOW_EVENT_SEQUENCE_STATE_KEY) or 0) + 1
-    state[WORKFLOW_EVENT_SEQUENCE_STATE_KEY] = sequence
-
-    payload = _parse_skill_script_stdout(result) if tool_name == "run_skill_script" else result
-    if not isinstance(payload, dict):
-        payload = result
-    audit_id = str(payload.get("audit_id") or result.get("audit_id") or _extract_audit_id(payload) or "")
-    if not audit_id and tool_name == "run_skill_script" and tool_args.get("skill_name") == "sandbox-page-analyst":
-        audit_id = WORKFLOW_EVENT_GROUP
-    elif not audit_id and tool_name in {
-        "update_extraction_context",
-        "load_skill",
-        "load_skill_resource",
-        "list_skill_resources",
-        "load_test_fixture_page_to_workspace",
-    }:
-        audit_id = WORKFLOW_EVENT_GROUP
-
-    source: dict[str, Any] = {
-        "event_index": sequence,
-        "tool_name": tool_name,
-        "status": str(payload.get("status") or result.get("status") or ""),
-    }
-    if audit_id:
-        source["audit_id"] = audit_id
-    skill_name = str(result.get("skill_name") or tool_args.get("skill_name") or payload.get("skill_name") or "")
-    file_path = str(result.get("file_path") or tool_args.get("file_path") or payload.get("file_path") or "")
-    if tool_name == "run_skill_script" and file_path.endswith("sandbox_exec.py") and audit_id:
-        source["note_group"] = audit_id
-    else:
-        source["note_group"] = WORKFLOW_EVENT_GROUP
-    if skill_name:
-        source["skill_name"] = skill_name
-    if file_path:
-        source["file_path"] = file_path
-    for key in (
-        "command_index",
-        "exit_code",
-        "message",
-        "summary",
-        "error",
-        "error_type",
-        "guardrail",
-        "required_next",
-        "written_count",
-        "candidate_count",
-        "relevant_count",
-        "expected_count",
-        "actual_count",
-        "missing_required_outputs",
-        "context_state",
-        "immediate_goal",
-    ):
-        if key in payload:
-            source[key] = _compact_latest_value(payload[key], 1_000)
-        elif key in result:
-            source[key] = _compact_latest_value(result[key], 1_000)
-    for key in ("stdout", "stdout_preview", "stderr", "stderr_preview", "content", "instructions"):
-        value = payload.get(key) if key in payload else result.get(key)
-        if value is not None:
-            source[key] = _preview(str(value), 1_000)
-    paths = _compact_output_paths(payload) or _compact_output_paths(result)
-    if paths:
-        source["paths"] = paths
-    artifact_handles = _compact_artifact_handles(result) or _compact_artifact_handles(payload)
-    if artifact_handles:
-        source["artifact_handles"] = artifact_handles
-    return source
-
-
-def _is_workflow_note_tool(tool_name: str, tool_args: dict[str, Any], result: dict[str, Any]) -> bool:
-    if tool_name in {
-        "update_extraction_context",
-        "load_skill",
-        "load_skill_resource",
-        "list_skill_resources",
-        "load_test_fixture_page_to_workspace",
-        "fetch_page_to_workspace",
-        "render_page_to_workspace",
-        "promote_sandbox_extraction",
-        "persist_sandbox_job_extraction",
-        "query_jobs",
-    }:
-        return True
-    if tool_name == "run_skill_script" and tool_args.get("skill_name") == "sandbox-page-analyst":
-        return True
-    return _looks_like_sandbox_payload(result)
-
-
-def _workflow_event_sort_key(event: dict[str, Any]) -> int:
-    try:
-        command_index = int(event.get("command_index") or 0)
-    except (TypeError, ValueError):
-        command_index = 0
-    if command_index > 0:
-        return command_index
-    try:
-        return int(event.get("event_index") or 0)
-    except (TypeError, ValueError):
-        return 0
-
-
-def _mark_summarized_workflow_events(state: Any, events: list[dict[str, Any]]) -> None:
-    summarized = state.setdefault(WORKFLOW_SUMMARIZED_EVENTS_STATE_KEY, [])
-    if not isinstance(summarized, list):
-        summarized = []
-        state[WORKFLOW_SUMMARIZED_EVENTS_STATE_KEY] = summarized
-    existing = {int(index) for index in summarized if str(index).isdigit()}
-    for event in events:
-        try:
-            existing.add(int(event.get("event_index") or 0))
-        except (TypeError, ValueError):
-            continue
-    state[WORKFLOW_SUMMARIZED_EVENTS_STATE_KEY] = sorted(index for index in existing if index > 0)
-
-
-def _prune_summarized_workflow_events(llm_request: LlmRequest, notes: list[Any], state: Any) -> None:
-    summarized = state.get(WORKFLOW_SUMMARIZED_EVENTS_STATE_KEY)
-    if not isinstance(summarized, list):
-        return
-    summarized_indexes = {int(index) for index in summarized if str(index).isdigit()}
-    if not summarized_indexes:
-        return
-    latest_note_by_audit = _latest_note_by_audit(notes)
-    event_index = 0
-    for content in llm_request.contents:
-        for part in content.parts or []:
-            response = getattr(part, "function_response", None)
-            if not response:
-                continue
-            if str(response.name or "") == "run_skill_script":
-                continue
-            payload = response.response or {}
-            if not isinstance(payload, dict):
-                continue
-            event_index += 1
-            if event_index not in summarized_indexes:
-                continue
-            if _is_workflow_event_placeholder(payload):
-                continue
-            response.response = _summarized_workflow_event_placeholder(
-                tool_name=str(response.name or ""),
-                payload=payload,
-                event_index=event_index,
-                latest_note_by_audit=latest_note_by_audit,
-            )
-
-
-def _is_workflow_event_placeholder(payload: dict[str, Any]) -> bool:
-    return str(payload.get("status") or "") in {
-        "workflow_event_context_removed_after_note_refinement",
-        "sandbox_context_removed_after_note_refinement",
-        "sandbox_context_removed_after_completion",
-        "resource_context_removed_after_state_update",
-        "resource_context_compacted_keep_latest_only",
-    }
-
-
-def _summarized_workflow_event_placeholder(
-    *,
-    tool_name: str,
-    payload: dict[str, Any],
-    event_index: int,
-    latest_note_by_audit: dict[str, Any],
-) -> dict[str, Any]:
-    parsed = _parse_skill_script_stdout(payload) if tool_name == "run_skill_script" else payload
-    if not isinstance(parsed, dict):
-        parsed = payload
-    audit_id = str(parsed.get("audit_id") or payload.get("audit_id") or _extract_audit_id(parsed) or WORKFLOW_EVENT_GROUP)
-    placeholder: dict[str, Any] = {
-        "status": "workflow_event_context_removed_after_note_refinement",
-        "tool_name": tool_name,
-        "event_index": event_index,
-        "audit_id": audit_id,
-        "original_status": str(parsed.get("status") or payload.get("status") or ""),
-        "reason": (
-            "This older ADK tool response was fused into a runtime note under 200 words. "
-            "The latest unsummarized tool response remains available in full."
-        ),
-    }
-    for key in ("skill_name", "file_path", "command_index", "exit_code", "guardrail", "error", "error_type"):
-        if key in parsed:
-            placeholder[key] = _compact_latest_value(parsed[key], 500)
-        elif key in payload:
-            placeholder[key] = _compact_latest_value(payload[key], 500)
-    paths = _compact_output_paths(parsed) or _compact_output_paths(payload)
-    if paths:
-        placeholder["paths"] = paths
-    artifact_handles = _compact_artifact_handles(payload) or _compact_artifact_handles(parsed)
-    if artifact_handles:
-        placeholder["artifact_handles"] = artifact_handles
-    latest_note = latest_note_by_audit.get(audit_id) or latest_note_by_audit.get(WORKFLOW_EVENT_GROUP)
-    if latest_note:
-        placeholder["latest_runtime_note"] = latest_note
-    return placeholder
-
-
-def _mark_summarized_commands(
-    state: Any,
-    audit_id: str,
-    commands: list[dict[str, Any]],
-) -> None:
-    summarized = state.setdefault(SANDBOX_SUMMARIZED_COMMANDS_STATE_KEY, {})
-    if not isinstance(summarized, dict):
-        summarized = {}
-        state[SANDBOX_SUMMARIZED_COMMANDS_STATE_KEY] = summarized
-    indexes = summarized.setdefault(audit_id, [])
-    if not isinstance(indexes, list):
-        indexes = []
-        summarized[audit_id] = indexes
-    existing = {int(index) for index in indexes if str(index).isdigit()}
-    for command in commands:
-        command_index = command.get("command_index")
-        try:
-            existing.add(int(command_index))
-        except (TypeError, ValueError):
-            continue
-    summarized[audit_id] = sorted(existing)
-
-
-def _prune_summarized_sandbox_contexts(llm_request: LlmRequest, notes: list[Any], state: Any) -> None:
-    summarized = state.get(SANDBOX_SUMMARIZED_COMMANDS_STATE_KEY)
-    if not isinstance(summarized, dict):
-        return
-    latest_note_by_audit = _latest_note_by_audit(notes)
-    for content in llm_request.contents:
-        for part in content.parts or []:
-            response = getattr(part, "function_response", None)
-            if not response or response.name != "run_skill_script":
-                continue
-            payload = response.response or {}
-            if not isinstance(payload, dict):
-                continue
-            if payload.get("status") in {
-                "sandbox_context_removed_after_note_refinement",
-                "sandbox_context_removed_after_completion",
-            }:
-                continue
-            if payload.get("skill_name") != "sandbox-page-analyst":
-                continue
-            file_path = str(payload.get("file_path") or "")
-            if not file_path.endswith("sandbox_exec.py"):
-                continue
-            stdout_payload = _parse_skill_script_stdout(payload)
-            audit_id = str(stdout_payload.get("audit_id") or payload.get("audit_id") or _extract_audit_id(payload) or "")
-            if not audit_id:
-                continue
-            try:
-                command_index = int(stdout_payload.get("command_index") or payload.get("command_index") or 0)
-            except (TypeError, ValueError):
-                command_index = 0
-            summarized_indexes = summarized.get(audit_id)
-            if not isinstance(summarized_indexes, list) or command_index not in {int(index) for index in summarized_indexes}:
-                continue
-            response.response = _summarized_sandbox_placeholder(
-                payload,
-                stdout_payload,
-                latest_note_by_audit.get(audit_id),
-            )
-
-
-def _summarized_sandbox_placeholder(
-    payload: dict[str, Any],
-    stdout_payload: dict[str, Any],
-    latest_note: Any,
-) -> dict[str, Any]:
-    audit_id = str(stdout_payload.get("audit_id") or payload.get("audit_id") or _extract_audit_id(payload) or "")
-    placeholder: dict[str, Any] = {
-        "status": "sandbox_context_removed_after_note_refinement",
-        "audit_id": audit_id,
-        "file_path": str(payload.get("file_path") or ""),
-        "original_status": str(stdout_payload.get("status") or payload.get("status") or ""),
-        "reason": (
-            "This sandbox command response was fused into runtime notes after a later command. "
-            "The newest unsummarized sandbox command remains available in full."
-        ),
-    }
-    for key in ("command_index", "exit_code", "guardrail", "error", "error_type"):
-        if key in stdout_payload:
-            placeholder[key] = stdout_payload[key]
-        elif key in payload:
-            placeholder[key] = payload[key]
-    paths = _compact_output_paths(stdout_payload) or _compact_output_paths(payload)
-    if paths:
-        placeholder["paths"] = paths
-    artifact_handles = _compact_artifact_handles(payload) or _compact_artifact_handles(stdout_payload)
-    if artifact_handles:
-        placeholder["artifact_handles"] = artifact_handles
-    if latest_note:
-        placeholder["latest_runtime_note"] = latest_note
-    return placeholder
-
-
-def _prune_completed_sandbox_contexts(llm_request: LlmRequest, notes: list[Any]) -> None:
-    pruneable_audits = _completed_sandbox_audits(llm_request)
-    if not pruneable_audits:
-        return
-    latest_note_by_audit = _latest_note_by_audit(notes)
-    for content in llm_request.contents:
-        for part in content.parts or []:
-            response = getattr(part, "function_response", None)
-            if not response or response.name != "run_skill_script":
-                continue
-            payload = response.response or {}
-            if not isinstance(payload, dict):
-                continue
-            if payload.get("status") == "sandbox_context_removed_after_completion":
-                continue
-            if payload.get("skill_name") != "sandbox-page-analyst":
-                continue
-            stdout_payload = _parse_skill_script_stdout(payload)
-            audit_id = str(stdout_payload.get("audit_id") or payload.get("audit_id") or _extract_audit_id(payload) or "")
-            if audit_id not in pruneable_audits:
-                continue
-            response.response = _completed_sandbox_placeholder(payload, stdout_payload, latest_note_by_audit.get(audit_id))
-
-
-def _completed_sandbox_audits(llm_request: LlmRequest) -> set[str]:
-    finalized: set[str] = set()
-    terminal: set[str] = set()
-    persistence_succeeded = False
-
-    for content in llm_request.contents:
-        for part in content.parts or []:
-            response = getattr(part, "function_response", None)
-            if not response:
-                continue
-            payload = response.response or {}
-            if not isinstance(payload, dict):
-                continue
-
-            if response.name in {"persist_sandbox_job_extraction", "promote_sandbox_extraction"}:
-                if payload.get("status") == "success" and int(payload.get("written_count") or 0) > 0:
-                    persistence_succeeded = True
-                continue
-
-            if response.name != "run_skill_script" or payload.get("skill_name") != "sandbox-page-analyst":
-                continue
-            file_path = str(payload.get("file_path") or "")
-            stdout_payload = _parse_skill_script_stdout(payload)
-            audit_id = str(stdout_payload.get("audit_id") or payload.get("audit_id") or _extract_audit_id(payload) or "")
-            if not audit_id:
-                continue
-            status = str(stdout_payload.get("status") or payload.get("status") or "")
-            if status == "guardrail_triggered":
-                terminal.add(audit_id)
-            if file_path.endswith("sandbox_finalize.py") and status in {"finalized", "success"}:
-                finalized.add(audit_id)
-
-    if persistence_succeeded:
-        terminal.update(finalized)
-    return terminal
-
-
-def _latest_note_by_audit(notes: list[Any]) -> dict[str, Any]:
-    latest: dict[str, Any] = {}
-    for note in notes:
-        if isinstance(note, dict):
-            audit_id = str(note.get("audit_id") or "")
-            if audit_id:
-                latest[audit_id] = note
-    return latest
-
-
-def _completed_sandbox_placeholder(
-    payload: dict[str, Any],
-    stdout_payload: dict[str, Any],
-    latest_note: Any,
-) -> dict[str, Any]:
-    audit_id = str(stdout_payload.get("audit_id") or payload.get("audit_id") or _extract_audit_id(payload) or "")
-    placeholder: dict[str, Any] = {
-        "status": "sandbox_context_removed_after_completion",
-        "audit_id": audit_id,
-        "file_path": str(payload.get("file_path") or ""),
-        "original_status": str(stdout_payload.get("status") or payload.get("status") or ""),
-        "reason": (
-            "Sandbox loop is terminal; detailed command response was removed from model context. "
-            "Use ADK artifacts, sandbox output paths, or runtime notes for audit details."
-        ),
-    }
-    for key in ("command_index", "exit_code", "guardrail", "error", "error_type"):
-        if key in stdout_payload:
-            placeholder[key] = stdout_payload[key]
-        elif key in payload:
-            placeholder[key] = payload[key]
-    paths = _compact_output_paths(stdout_payload) or _compact_output_paths(payload)
-    if paths:
-        placeholder["paths"] = paths
-    artifact_handles = _compact_artifact_handles(payload) or _compact_artifact_handles(stdout_payload)
-    if artifact_handles:
-        placeholder["artifact_handles"] = artifact_handles
-    if latest_note:
-        placeholder["latest_runtime_note"] = latest_note
-    return placeholder
-
-
-def _sandbox_command_note_source(payload: dict[str, Any], file_path: str) -> dict[str, Any]:
-    source: dict[str, Any] = {
-        "file_path": file_path,
-        "status": str(payload.get("status") or ""),
-        "audit_id": str(payload.get("audit_id") or _extract_audit_id(payload) or ""),
-    }
-    for key in (
-        "command_index",
-        "exit_code",
-        "message",
-        "error",
-        "error_type",
-        "guardrail",
-        "stdout_truncated",
-        "stderr_truncated",
-        "stdout_bytes",
-        "stderr_bytes",
-    ):
-        if key in payload:
-            source[key] = payload[key]
-    for key in ("stdout", "stdout_preview", "stderr", "stderr_preview"):
-        value = payload.get(key)
-        if value is not None:
-            source[key] = _preview(str(value), 2_000)
-    paths = _compact_output_paths(payload)
-    if paths:
-        source["paths"] = paths
-    artifact_handles = _compact_artifact_handles(payload)
-    if artifact_handles:
-        source["artifact_handles"] = artifact_handles
-    return source
-
-
-def _sandbox_command_sort_key(command: dict[str, Any]) -> int:
-    try:
-        return int(command.get("command_index") or 0)
-    except (TypeError, ValueError):
-        return 0
-
-
-def _compact_run_skill_script_result(
-    result: dict[str, Any],
-    tool_args: dict[str, Any],
-    preview_max_chars: int,
-) -> dict[str, Any]:
-    parsed_stdout = _parse_skill_script_stdout(result)
-    payload = parsed_stdout if parsed_stdout is not result else result
-    compact = _compact_sandbox_response(payload, min(preview_max_chars, 500))
-    compact["skill_name"] = str(result.get("skill_name") or tool_args.get("skill_name") or "")
-    compact["file_path"] = str(result.get("file_path") or tool_args.get("file_path") or "")
-    if result.get("status") and result.get("status") != compact.get("status"):
-        compact["tool_status"] = result["status"]
-    if result.get("stderr") and result.get("stderr") != payload.get("stderr"):
-        compact["tool_stderr"] = _preview(str(result["stderr"]), min(preview_max_chars, 500))
-    return compact
-
-
-def _compact_sandbox_response(payload: dict[str, Any], preview_max_chars: int) -> dict[str, Any]:
-    compact: dict[str, Any] = {
-        "status": str(payload.get("status") or "sandbox_context_compacted"),
-        "audit_id": str(payload.get("audit_id") or _extract_audit_id(payload) or ""),
-    }
-
-    # ADK Web displays the start of large function responses first. Put the
-    # actual bounded output preview before artifact/path metadata so the model
-    # and human debugger see useful text without expanding nested handles.
-    for key in (
-        "exit_code",
-        "command_index",
-    ):
-        if key in payload:
-            compact[key] = payload[key]
-
-    stdout_value = payload.get("stdout")
-    if stdout_value is None:
-        stdout_value = payload.get("stdout_preview")
-    if stdout_value is not None:
-        stdout_preview = _preview(str(stdout_value), preview_max_chars)
-        compact["stdout"] = stdout_preview
-        compact["stdout_preview"] = stdout_preview
-
-    stderr_value = payload.get("stderr")
-    if stderr_value is None:
-        stderr_value = payload.get("stderr_preview")
-    if stderr_value is not None:
-        stderr_preview = _preview(str(stderr_value), preview_max_chars)
-        compact["stderr"] = stderr_preview
-        compact["stderr_preview"] = stderr_preview
-
-    for key in (
-        "stdout_truncated",
-        "stderr_truncated",
-        "returned_stdout_chars",
-        "returned_stderr_chars",
-        "stdout_bytes",
-        "stderr_bytes",
-        "message",
-        "observation",
-        "error_type",
-        "path",
-        "model",
-        "written",
-        "errors",
-        "guardrail",
-        "error",
-        "expected_count",
-        "actual_count",
-        "missing_required_outputs",
-    ):
-        if key in payload:
-            compact[key] = payload[key]
-
-    paths = _compact_output_paths(payload)
-    if paths:
-        compact["paths"] = paths
-
-    artifact_handles = _compact_artifact_handles(payload)
-    if artifact_handles:
-        compact["artifact_handles"] = artifact_handles
-
-    compact["compacted"] = True
-    return compact
-
-
-def _compact_artifact_handles(payload: dict[str, Any]) -> dict[str, Any]:
-    handles: dict[str, Any] = {}
-    artifacts = payload.get("artifacts")
-    if isinstance(artifacts, dict):
-        for source_key, target_key in (
-            ("command", "command_file"),
-            ("stdout", "stdout_file"),
-            ("stderr", "stderr_file"),
-            ("trace", "trace_file"),
-        ):
-            artifact = artifacts.get(source_key)
-            if isinstance(artifact, dict):
-                handles[target_key] = artifact
-        for key, artifact in artifacts.items():
-            if key not in {"command", "stdout", "stderr", "trace"} and isinstance(artifact, dict):
-                handles[str(key)] = artifact
-    artifact = payload.get("artifact")
-    if isinstance(artifact, dict):
-        handles.setdefault("primary", artifact)
-    return handles
-
-
-def _compact_output_paths(payload: dict[str, Any]) -> dict[str, str]:
-    paths: dict[str, str] = {}
-    existing_paths = payload.get("paths")
-    if isinstance(existing_paths, dict):
-        for key in ("command_path", "stdout_path", "stderr_path", "trace_path"):
-            value = existing_paths.get(key)
-            if value:
-                paths[key] = str(value)
-    output_policy = payload.get("output_policy")
-    if isinstance(output_policy, dict):
-        for key in ("command_path", "stdout_path", "stderr_path"):
-            value = output_policy.get(key)
-            if value:
-                paths[key] = str(value)
-    artifacts = payload.get("artifacts")
-    if isinstance(artifacts, dict):
-        for artifact_key, path_key in (
-            ("command", "command_path"),
-            ("stdout", "stdout_path"),
-            ("stderr", "stderr_path"),
-            ("trace", "trace_path"),
-        ):
-            artifact = artifacts.get(artifact_key)
-            if isinstance(artifact, dict) and artifact.get("path"):
-                paths.setdefault(path_key, str(artifact["path"]))
-    return paths
-
-
 def _parse_skill_script_stdout(result: dict[str, Any]) -> dict[str, Any]:
     stdout = result.get("stdout")
     if not isinstance(stdout, str) or not stdout.strip():
@@ -5759,28 +4048,19 @@ def _parse_skill_script_stdout(result: dict[str, Any]) -> dict[str, Any]:
 
 
 def _promote_script_payload_error(result: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
-    status = str(payload.get("status") or "").lower()
-    has_error = status in {"error", "blocked", "guardrail_triggered"} or bool(payload.get("error") or payload.get("error_type"))
+    status = str(payload.get(RuntimePayloadKey.STATUS) or "").lower()
+    has_error = status in {RuntimeStatus.ERROR, "blocked", RuntimeStatus.GUARDRAIL_TRIGGERED} or bool(
+        payload.get(RuntimePayloadKey.ERROR) or payload.get(RuntimePayloadKey.ERROR_TYPE)
+    )
     if not has_error:
         return result
 
     updated = dict(result)
-    for key in (
-        "status",
-        "audit_id",
-        "error",
-        "error_type",
-        "guardrail",
-        "missing_files",
-        "required_files",
-        "ignored_inline_args",
-        "count",
-        "written_count",
-    ):
+    for key in PROMOTED_SCRIPT_PAYLOAD_ERROR_KEYS:
         if key in payload:
             updated[key] = payload[key]
-    if "tool_status" not in updated and result.get("status") and result.get("status") != updated.get("status"):
-        updated["tool_status"] = result["status"]
+    if RuntimePayloadKey.TOOL_STATUS not in updated and result.get(RuntimePayloadKey.STATUS) and result.get(RuntimePayloadKey.STATUS) != updated.get(RuntimePayloadKey.STATUS):
+        updated[RuntimePayloadKey.TOOL_STATUS.value] = result[RuntimePayloadKey.STATUS]
     return updated
 
 

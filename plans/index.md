@@ -14,6 +14,7 @@ This folder is the human-facing planning interface for the project.
 - [Sandbox token reporting](active/03-sandbox-token-reporting.md)
 - [Skill-script sandbox terminal](active/04-skill-script-sandbox-terminal.md)
 - [AGE-38 Linear release and changelog sync](active/05-age38-linear-release-changelog-sync.md)
+- [AGE-46 ADK plugin module refactor](active/07-age46-adk-plugin-module-refactor.md)
 
 ## Backlog Plans
 
