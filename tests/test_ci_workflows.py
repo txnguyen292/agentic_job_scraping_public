@@ -21,6 +21,20 @@ def test_dependabot_policy_uses_supported_idempotent_label_lookup() -> None:
     assert "|| gh label edit \"$name\"" in workflow
 
 
+def test_dependabot_policy_replaces_upstream_dump_with_repository_changelog() -> None:
+    workflow = _workflow("dependabot-update-policy.yml")
+
+    assert "- name: Publish repository dependency changelog" in workflow
+    assert "python scripts/dependabot_changelog.py" in workflow
+    assert "--dependency-names \"$DEPENDENCIES\"" in workflow
+    assert "--previous-version \"$PREVIOUS_VERSION\"" in workflow
+    assert "--new-version \"$NEW_VERSION\"" in workflow
+    assert "--update-type \"$UPDATE_TYPE\"" in workflow
+    assert "--package-ecosystem \"$PACKAGE_ECOSYSTEM\"" in workflow
+    assert "Review the repository dependency changelog" in workflow
+    assert "Review the upstream changelog" not in workflow
+
+
 def test_dependency_security_refresh_uses_supported_idempotent_label_lookup() -> None:
     workflow = _workflow("dependency-security-refresh.yml")
 
